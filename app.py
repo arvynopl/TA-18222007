@@ -126,7 +126,7 @@ def _page_beranda() -> None:
            - *Loss Aversion* — Menahan saham rugi terlalu lama
         3. **Profil Kognitif** — Profilmu diperbarui setelah setiap sesi menggunakan
            model *Cognitive Digital Twin* (CDT) berbasis EMA.
-        4. **Umpan Balik* — Kamu menerima penjelasan personal dan rekomendasi perbaikan.
+        4. **Umpan Balik** — Kamu menerima penjelasan personal dan rekomendasi perbaikan.
         """
     )
 

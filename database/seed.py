@@ -161,9 +161,6 @@ def run_seed() -> None:
             "Seed complete — %d stocks, %d snapshots inserted.",
             catalog_count, snapshot_count,
         )
-        print(
-            f"Seed complete — {catalog_count} stocks, {snapshot_count} snapshots inserted."
-        )
 
 
 if __name__ == "__main__":
