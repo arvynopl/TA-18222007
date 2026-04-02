@@ -10,7 +10,8 @@ Functions:
     get_longitudinal_summary — Summarise bias trends across all sessions.
 """
 
-from datetime import datetime
+from collections import defaultdict
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -19,8 +20,9 @@ from config import (
     DEI_MODERATE, DEI_SEVERE,
     LAI_MODERATE, LAI_SEVERE,
     OCS_MODERATE, OCS_SEVERE,
+    ROUNDS_PER_SESSION,
 )
-from database.models import BiasMetric, CognitiveProfile, FeedbackHistory, MarketSnapshot
+from database.models import BiasMetric, CognitiveProfile, FeedbackHistory, MarketSnapshot, UserAction
 from modules.analytics.bias_metrics import classify_severity
 from modules.feedback.templates import TEMPLATES
 
@@ -58,16 +60,18 @@ def compute_counterfactual(
     actual_gain = (best["sell_price"] - best["buy_price"]) * best["quantity"]
 
     # Try to find what price was extra_rounds after sell_round
-    target_round = best["sell_round"] + extra_rounds
-    if target_round > 14:
+    # Clamp extra_rounds so we don't project beyond the simulation window
+    actual_extra = min(extra_rounds, ROUNDS_PER_SESSION - best["sell_round"])
+    if actual_extra <= 0:
         return ""
+    target_round = best["sell_round"] + actual_extra
 
     # We don't have a direct round→snapshot mapping here; use a heuristic estimate
     # Assume linear extrapolation from buy→sell trend (conservative)
     trend_per_round = (best["sell_price"] - best["buy_price"]) / max(
         best["sell_round"] - best["buy_round"], 1
     )
-    projected_price = best["sell_price"] + trend_per_round * extra_rounds
+    projected_price = best["sell_price"] + trend_per_round * actual_extra
     projected_gain = (projected_price - best["buy_price"]) * best["quantity"]
 
     if projected_gain <= actual_gain:
@@ -77,7 +81,7 @@ def compute_counterfactual(
     return (
         f"Contoh: kamu menjual {best['stock_id']} di putaran {best['sell_round']} "
         f"dengan keuntungan Rp {actual_gain:,.0f}. "
-        f"Jika kamu menahan {extra_rounds} putaran lebih lama, "
+        f"Jika kamu menahan {actual_extra} putaran lebih lama, "
         f"estimasi keuntungan bisa mencapai Rp {projected_gain:,.0f} "
         f"(tambahan ≈ Rp {additional:,.0f})."
     )
@@ -112,19 +116,16 @@ def generate_feedback(
     realized_trades = realized_trades or []
     open_positions = open_positions or []
 
+    # Actual buy+sell action count from DB (Bug 2 fix)
     trade_count = (
-        (bias_metric.overconfidence_score and 1 or 0)
-    )  # placeholder — computed below from template slot
+        db_session.query(UserAction)
+        .filter_by(user_id=user_id, session_id=session_id)
+        .filter(UserAction.action_type.in_(["buy", "sell"]))
+        .count()
+    )
 
     win_count = sum(1 for t in realized_trades if t["sell_price"] > t["buy_price"])
     loss_count = sum(1 for t in realized_trades if t["sell_price"] < t["buy_price"])
-    buy_sell_count = len([
-        t for t in realized_trades
-    ]) + win_count + loss_count  # approximation
-
-    # Better: use the raw counts from the feature extraction; fall back to 0
-    # The caller should pass these if available
-    total_trades = len(realized_trades) + len(open_positions)
 
     # Counterfactual text (only for severe cases)
     counterfactual_disp = compute_counterfactual(
@@ -170,7 +171,7 @@ def generate_feedback(
             "moderate_t": OCS_MODERATE,
             "slots": {
                 "ocs": ocs_val,
-                "trade_count": len(realized_trades) * 2,  # approx buy+sell
+                "trade_count": trade_count,
                 "counterfactual_text": counterfactual_oc,
             },
         },
@@ -199,12 +200,10 @@ def generate_feedback(
             recommendation = "Terus pantau keputusan investasimu dan jaga konsistensi."
         else:
             tmpl = TEMPLATES[cfg["bias_type"]][severity]
-            try:
-                explanation = tmpl["explanation"].format(**cfg["slots"])
-                recommendation = tmpl["recommendation"].format(**cfg["slots"])
-            except KeyError:
-                explanation = tmpl["explanation"]
-                recommendation = tmpl["recommendation"]
+            # Use defaultdict so missing slots become empty strings (Bug 7 fix)
+            safe_slots = defaultdict(str, cfg["slots"])
+            explanation = tmpl["explanation"].format_map(safe_slots)
+            recommendation = tmpl["recommendation"].format_map(safe_slots)
 
         record = FeedbackHistory(
             user_id=user_id,
@@ -213,7 +212,7 @@ def generate_feedback(
             severity=severity,
             explanation_text=explanation,
             recommendation_text=recommendation,
-            delivered_at=datetime.utcnow(),
+            delivered_at=datetime.now(timezone.utc),
         )
         db_session.add(record)
         records.append(record)

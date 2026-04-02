@@ -105,12 +105,24 @@ def init_simulation_session() -> None:
     if "sim_complete" not in st.session_state:
         st.session_state["sim_complete"] = False
 
+    if "sim_submitted_round" not in st.session_state:
+        st.session_state["sim_submitted_round"] = 0
+
+    if "stock_metadata" not in st.session_state:
+        with get_session() as sess:
+            stocks = sess.query(StockCatalog).all()
+            st.session_state["stock_metadata"] = {
+                s.stock_id: {"name": s.name, "sector": s.sector}
+                for s in stocks
+            }
+
 
 def reset_simulation() -> None:
     """Clear all simulation-related state keys to start fresh."""
     for key in [
         "sim_session_id", "sim_portfolio", "sim_engine", "sim_window",
         "sim_stock_ids", "sim_current_round", "sim_round_start_time", "sim_complete",
+        "sim_submitted_round", "stock_metadata",
     ]:
         st.session_state.pop(key, None)
 
@@ -179,6 +191,9 @@ def render_simulation_page() -> None:
     # -----------------------------------------------------------------------
     # Header — round counter + portfolio summary
     # -----------------------------------------------------------------------
+    # Enhancement 2: Round progress bar
+    st.progress(current_round / ROUNDS_PER_SESSION, text=f"Putaran {current_round} / {ROUNDS_PER_SESSION}")
+
     col_round, col_value, col_cash = st.columns(3)
     with col_round:
         st.metric("Putaran", f"{current_round} / {ROUNDS_PER_SESSION}")
@@ -237,8 +252,15 @@ def render_simulation_page() -> None:
 
         with cols[i % 2]:
             with st.container(border=True):
-                # Fetch stock name for display
-                st.markdown(f"**{sid}**")
+                # Enhancement 1: Show full stock name and sector
+                meta = st.session_state.get("stock_metadata", {}).get(sid, {})
+                ticker = sid.split(".")[0]
+                name_str = meta.get("name", "")
+                sector_str = meta.get("sector", "")
+                if name_str:
+                    st.markdown(f"**{ticker}** — {name_str} *({sector_str})*")
+                else:
+                    st.markdown(f"**{sid}**")
                 trend = snap.get("trend") or "—"
                 daily_ret = snap.get("daily_return")
                 ret_str = f"{daily_ret*100:+.2f}%" if daily_ret is not None else "—"
@@ -278,14 +300,14 @@ def render_simulation_page() -> None:
                             "Jumlah lembar (Beli)",
                             min_value=0, max_value=max(max_buy, 0),
                             value=0, step=1,
-                            key=f"qty_{sid}",
+                            key=f"qty_buy_{sid}",
                         )
                     else:
                         quantity = st.number_input(
                             "Jumlah lembar (Jual)",
                             min_value=0, max_value=max(max_sell, 0),
                             value=0, step=1,
-                            key=f"qty_{sid}",
+                            key=f"qty_sell_{sid}",
                         )
 
                 action_inputs[sid] = {
@@ -298,6 +320,11 @@ def render_simulation_page() -> None:
     # Submit button
     # -----------------------------------------------------------------------
     st.markdown("---")
+    # Enhancement 5: Round submission guard — prevent double-submission
+    if st.session_state.get("sim_submitted_round") == current_round:
+        st.info("Putaran ini sudah dieksekusi. Menunggu putaran berikutnya…")
+        return
+
     if st.button("✅ Eksekusi Keputusan", use_container_width=True, type="primary"):
         response_time_ms = int((time.time() - st.session_state["sim_round_start_time"]) * 1000)
 
@@ -342,15 +369,19 @@ def render_simulation_page() -> None:
             for err in errors:
                 st.error(err)
 
+        # Mark this round as submitted (Enhancement 5 + Bug 9 guard)
+        st.session_state["sim_submitted_round"] = current_round
+
         # Advance round
         next_round = current_round + 1
         st.session_state["sim_current_round"] = next_round
         st.session_state["sim_round_start_time"] = time.time()
 
-        if next_round > ROUNDS_PER_SESSION:
-            # Trigger post-session pipeline
+        # Bug 9 fix: set sim_complete BEFORE running the pipeline to prevent
+        # duplicate execution if st.rerun() fires before the state is committed
+        if next_round > ROUNDS_PER_SESSION and not st.session_state.get("sim_complete"):
+            st.session_state["sim_complete"] = True
             with st.spinner("Menganalisis keputusan investasi kamu…"):
                 _run_post_session_pipeline(user_id, session_id)
-            st.session_state["sim_complete"] = True
 
         st.rerun()

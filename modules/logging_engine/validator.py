@@ -34,24 +34,25 @@ def validate_session_completeness(
         .all()
     )
 
-    # Count unique stocks that were ever acted on
+    # Collect the full set of stock IDs that should appear in every round
     stock_ids_in_session = {a.stock_id for a in actions}
     expected_per_round = max(len(stock_ids_in_session), 1)
     expected_total = ROUNDS_PER_SESSION * expected_per_round
 
-    # Group actions by round
-    rounds_map: dict[int, list] = {}
+    # Group actions by round, then by stock_id within each round
+    rounds_map: dict[int, set] = {}
     for action in actions:
-        rounds_map.setdefault(action.scenario_round, []).append(action)
+        rounds_map.setdefault(action.scenario_round, set()).add(action.stock_id)
 
+    # A round is "missing" if it doesn't have exactly one action per expected stock
     missing_rounds = [
         r
         for r in range(1, ROUNDS_PER_SESSION + 1)
-        if len(rounds_map.get(r, [])) < expected_per_round
+        if not stock_ids_in_session.issubset(rounds_map.get(r, set()))
     ]
 
     return {
-        "is_complete": len(actions) >= expected_total and not missing_rounds,
+        "is_complete": not missing_rounds,
         "action_count": len(actions),
         "expected_count": expected_total,
         "missing_rounds": missing_rounds,

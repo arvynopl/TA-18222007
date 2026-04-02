@@ -8,7 +8,7 @@ Functions:
     update_profile — Apply one EMA step and persist the updated profile.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Sequence
 
 from sqlalchemy.orm import Session
@@ -74,8 +74,16 @@ def update_profile(
 
     high_vol_count = 0
     total_count = len(actions)
+    # Batch-fetch all StockCatalog rows needed (Bug 10: eliminates N+1 queries)
+    stock_ids_set = {a.stock_id for a in actions}
+    stocks_map = {
+        s.stock_id: s
+        for s in db_session.query(StockCatalog)
+        .filter(StockCatalog.stock_id.in_(stock_ids_set))
+        .all()
+    }
     for action in actions:
-        stock = db_session.query(StockCatalog).filter_by(stock_id=action.stock_id).first()
+        stock = stocks_map.get(action.stock_id)
         if stock and stock.volatility_class in HIGH_VOLATILITY_CLASSES:
             high_vol_count += 1
 
@@ -85,7 +93,7 @@ def update_profile(
     # --- Session count and stability ---
     profile.session_count += 1
     profile.stability_index = compute_stability_index(db_session, user_id)
-    profile.last_updated_at = datetime.utcnow()
+    profile.last_updated_at = datetime.now(timezone.utc)
 
     db_session.flush()
     return profile

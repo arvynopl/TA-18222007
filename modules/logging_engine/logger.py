@@ -6,11 +6,14 @@ Functions:
     log_hold    — Convenience wrapper for hold actions.
 """
 
-from datetime import datetime
+import logging
+from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
 from database.models import UserAction
+
+logger = logging.getLogger(__name__)
 
 
 _VALID_ACTIONS = {"buy", "sell", "hold"}
@@ -67,7 +70,7 @@ def log_action(
         quantity=quantity,
         action_value=action_value,
         response_time_ms=response_time_ms,
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
     )
     session.add(action)
     session.flush()   # Assign id without committing the outer transaction

@@ -239,3 +239,88 @@ def test_bias_metric_values_in_valid_range(db, user):
     assert 0.0 <= (metric.disposition_pgr or 0.0) <= 1.0
     assert 0.0 <= (metric.disposition_plr or 0.0) <= 1.0
     assert (metric.loss_aversion_index or 0.0) >= 0.0
+
+
+def test_final_price_uses_market_not_cost_basis():
+    """Bug 1 regression guard: final_price for held positions must come from
+    the last MarketSnapshot close, NOT from the cost-basis (avg_price).
+
+    Setup: buy BBCA at 9 000 in round 1, hold all 14 rounds.
+           Day-13 snapshot (round 14) has close = 10 500  ≠ buy price.
+    Expected: open_positions[0]['final_price'] == 10 500.0
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    sess = Session()
+
+    # Seed stock
+    s = StockCatalog(
+        stock_id="BBCA.JK", ticker="BBCA", name="BCA Corp",
+        sector="Finance", volatility_class="low", bias_role="test",
+    )
+    sess.add(s)
+    sess.flush()
+
+    # Seed 14 snapshots: days 0-12 close=9000, day 13 close=10500
+    base_date = date(2024, 4, 2)
+    snap_ids: list[int] = []
+    for day in range(14):
+        close = 10_500.0 if day == 13 else 9_000.0
+        snap = MarketSnapshot(
+            stock_id="BBCA.JK",
+            date=base_date + timedelta(days=day),
+            open=close, high=close, low=close, close=close,
+            volume=1_000_000, ma_5=close, ma_20=close, rsi_14=50.0,
+            volatility_20d=0.02, trend="neutral", daily_return=0.0,
+        )
+        sess.add(snap)
+        sess.flush()
+        snap_ids.append(snap.id)
+
+    # Seed user
+    u = User(alias="bug1_user", experience_level="beginner")
+    sess.add(u)
+    sess.flush()
+
+    session_id = str(uuid.uuid4())
+    buy_price = 9_000.0
+
+    # Log 14 rounds: buy round 1, hold rounds 2-14
+    for rnd in range(1, 15):
+        snap_id = snap_ids[rnd - 1]
+        if rnd == 1:
+            atype, qty, val = "buy", 10, 10 * buy_price
+        else:
+            atype, qty, val = "hold", 0, 0.0
+        log_action(
+            session=sess,
+            user_id=u.id,
+            session_id=session_id,
+            scenario_round=rnd,
+            stock_id="BBCA.JK",
+            snapshot_id=snap_id,
+            action_type=atype,
+            quantity=qty,
+            action_value=val,
+            response_time_ms=500,
+        )
+    sess.flush()
+
+    features = extract_session_features(sess, u.id, session_id)
+
+    assert len(features.open_positions) == 1, "Expected 1 open position (BBCA held all 14 rounds)"
+    pos = features.open_positions[0]
+
+    # The final price MUST come from the last snapshot (10 500), not avg_price (9 000)
+    assert pos["final_price"] == pytest.approx(10_500.0), (
+        f"final_price should be 10500 (last snapshot close), got {pos['final_price']} "
+        f"(avg_price={pos['avg_price']})"
+    )
+    assert pos["avg_price"] == pytest.approx(9_000.0)
+    assert pos["unrealized_pnl"] == pytest.approx((10_500.0 - 9_000.0) * 10)
+
+    sess.close()
