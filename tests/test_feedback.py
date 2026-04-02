@@ -119,8 +119,8 @@ def test_severe_overconfidence_selects_correct_template(db, user):
 
 
 def test_none_severity_produces_positive_feedback(db, user):
-    """DEI = 0.05 (below moderate threshold) → severity = 'none', positive message."""
-    metric = _make_metric(db, user.id, dei=0.05, ocs=0.1, lai=0.8)
+    """DEI = 0.03 (below mild threshold) → severity = 'none', positive message."""
+    metric = _make_metric(db, user.id, dei=0.03, ocs=0.1, lai=0.8)
     profile = get_or_create_profile(db, user.id)
 
     feedbacks = generate_feedback(db, user.id, metric.session_id, metric, profile)

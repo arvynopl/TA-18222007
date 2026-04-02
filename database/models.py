@@ -11,7 +11,7 @@ from typing import Optional
 
 from sqlalchemy import (
     BigInteger, Boolean, Column, Date, DateTime, Float,
-    ForeignKey, Integer, JSON, String, Text, UniqueConstraint,
+    ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
 
@@ -108,6 +108,9 @@ class UserAction(Base):
     """One decision (buy/sell/hold) made by a user during a simulation round."""
 
     __tablename__ = "user_actions"
+    __table_args__ = (
+        Index("ix_useraction_user_session", "user_id", "session_id"),
+    )
 
     id: int = Column(Integer, primary_key=True, autoincrement=True)
     user_id: int = Column(Integer, ForeignKey("users.id"), nullable=False)
@@ -141,6 +144,9 @@ class BiasMetric(Base):
     """Computed bias scores for a completed simulation session."""
 
     __tablename__ = "bias_metrics"
+    __table_args__ = (
+        Index("ix_biasmetric_user_session", "user_id", "session_id"),
+    )
 
     id: int = Column(Integer, primary_key=True, autoincrement=True)
     user_id: int = Column(Integer, ForeignKey("users.id"), nullable=False)
@@ -204,6 +210,9 @@ class FeedbackHistory(Base):
     """Delivered feedback record for a specific bias in a session."""
 
     __tablename__ = "feedback_history"
+    __table_args__ = (
+        Index("ix_feedbackhistory_user_session", "user_id", "session_id"),
+    )
 
     id: int = Column(Integer, primary_key=True, autoincrement=True)
     user_id: int = Column(Integer, ForeignKey("users.id"), nullable=False)
