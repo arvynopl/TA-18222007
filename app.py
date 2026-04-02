@@ -56,11 +56,12 @@ _bootstrap_database()
 def _init_session_state() -> None:
     """Ensure all expected session state keys exist with safe defaults."""
     defaults = {
-        "current_page": "Beranda",
+        "current_page": "Informasi & Persetujuan",
         "user_id": None,
         "user_alias": None,
         "experience_level": None,
         "last_session_id": None,
+        "consent_given": False,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -77,6 +78,7 @@ def _sidebar() -> str:
         st.caption("Cognitive Digital Twin\nDeteksi Bias Perilaku")
 
         pages = [
+            "Informasi & Persetujuan",
             "Beranda",
             "Simulasi Investasi",
             "Hasil Analisis & Umpan Balik",
@@ -107,10 +109,81 @@ def _sidebar() -> str:
 
 
 # ---------------------------------------------------------------------------
+# Page: Informasi & Persetujuan
+# ---------------------------------------------------------------------------
+def _page_consent() -> None:
+    """UAT consent and research information page."""
+    st.title("Informasi Penelitian & Persetujuan Partisipasi")
+
+    st.markdown(
+        """
+        ## Tentang Penelitian Ini
+
+        Sistem ini dikembangkan sebagai bagian dari penelitian tugas akhir di
+        **Institut Teknologi Bandung (ITB)**, Program Studi Sistem dan Teknologi Informasi.
+        Penelitian ini bertujuan untuk membangun sebuah *Cognitive Digital Twin* (CDT) yang
+        mampu mendeteksi dan memitigasi bias perilaku investor ritel di pasar modal Indonesia.
+
+        ## Apa yang Akan Kamu Lakukan?
+
+        Kamu akan diminta untuk menyelesaikan **1–3 sesi simulasi investasi** menggunakan
+        data historis saham IDX. Setiap sesi terdiri dari 14 putaran di mana kamu memutuskan
+        untuk membeli, menjual, atau menahan 6 saham IDX pilihan. Setelah setiap sesi, sistem
+        akan menganalisis pola keputusanmu dan memberikan umpan balik personal.
+
+        Estimasi waktu per sesi: **15–20 menit**.
+
+        ## Data yang Dikumpulkan
+
+        Sistem ini mengumpulkan data berikut selama partisipasi:
+        - **Keputusan investasi** (beli / jual / tahan) beserta jumlah lembar saham
+        - **Waktu respons** untuk setiap keputusan (dalam milidetik)
+        - **Alias / nama panggilan** yang kamu masukkan saat login (bukan nama asli)
+
+        **Data tidak dikaitkan dengan identitas asli kamu.** Semua data disimpan secara
+        lokal dan hanya digunakan untuk keperluan penelitian akademis.
+        """
+    )
+
+    st.divider()
+
+    consent = st.checkbox(
+        "Saya telah membaca informasi di atas dan **menyetujui** partisipasi dalam penelitian ini.",
+        value=st.session_state.get("consent_given", False),
+        key="consent_checkbox",
+    )
+
+    if consent:
+        st.session_state["consent_given"] = True
+        st.success(
+            "Terima kasih atas persetujuanmu! Silakan lanjutkan ke halaman **Beranda** "
+            "untuk login dan memulai simulasi."
+        )
+        if st.button("Lanjut ke Beranda →", type="primary"):
+            st.session_state["current_page"] = "Beranda"
+            st.rerun()
+    else:
+        st.session_state["consent_given"] = False
+        st.info(
+            "Centang kotak di atas untuk menyetujui partisipasi dan membuka akses ke simulasi."
+        )
+
+
+# ---------------------------------------------------------------------------
 # Page: Beranda
 # ---------------------------------------------------------------------------
 def _page_beranda() -> None:
     st.title("Selamat Datang di Sistem CDT Deteksi Bias Investasi")
+
+    if not st.session_state.get("consent_given"):
+        st.warning(
+            "Kamu belum memberikan persetujuan partisipasi. "
+            "Silakan baca informasi penelitian di halaman **Informasi & Persetujuan** terlebih dahulu."
+        )
+        if st.button("Ke Halaman Persetujuan →"):
+            st.session_state["current_page"] = "Informasi & Persetujuan"
+            st.rerun()
+        return
 
     st.markdown(
         """
@@ -129,6 +202,30 @@ def _page_beranda() -> None:
         4. **Umpan Balik** — Kamu menerima penjelasan personal dan rekomendasi perbaikan.
         """
     )
+
+    # Session history for logged-in users
+    user_id = st.session_state.get("user_id")
+    if user_id:
+        with get_session() as sess:
+            past = (
+                sess.query(BiasMetric)
+                .filter_by(user_id=user_id)
+                .order_by(BiasMetric.computed_at.desc())
+                .all()
+            )
+            session_count = len(past)
+            last_date = past[0].computed_at if past else None
+
+        st.divider()
+        st.subheader("Riwayat Sesimu")
+        c1, c2 = st.columns(2)
+        c1.metric("Total Sesi Selesai", session_count)
+        if last_date:
+            c2.metric("Sesi Terakhir", last_date.strftime("%d %b %Y %H:%M"))
+        else:
+            c2.metric("Sesi Terakhir", "—")
+        if session_count == 0:
+            st.info("Kamu belum menyelesaikan sesi simulasi. Mulai sekarang!")
 
     st.divider()
     st.subheader("Login / Daftar")
@@ -313,10 +410,15 @@ def main() -> None:
     _init_session_state()
     page = _sidebar()
 
-    if page == "Beranda":
+    if page == "Informasi & Persetujuan":
+        _page_consent()
+    elif page == "Beranda":
         _page_beranda()
     elif page == "Simulasi Investasi":
-        render_simulation_page()
+        if not st.session_state.get("consent_given"):
+            st.warning("Silakan setujui partisipasi penelitian di halaman **Informasi & Persetujuan** terlebih dahulu.")
+        else:
+            render_simulation_page()
     elif page == "Hasil Analisis & Umpan Balik":
         _page_hasil()
     elif page == "Profil Kognitif Saya":
