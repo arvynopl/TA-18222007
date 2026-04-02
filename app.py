@@ -11,8 +11,11 @@ Run with:
     streamlit run app.py
 """
 
+import logging
+
 import plotly.graph_objects as go
 import streamlit as st
+from sqlalchemy.exc import IntegrityError
 
 from config import INITIAL_CAPITAL
 from database.connection import get_session, init_db
@@ -20,6 +23,9 @@ from database.models import BiasMetric, CognitiveProfile, User
 from database.seed import run_seed
 from modules.feedback.renderer import render_feedback_page
 from modules.simulation.ui import render_simulation_page
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # App-wide configuration
@@ -45,6 +51,23 @@ _bootstrap_database()
 
 
 # ---------------------------------------------------------------------------
+# Centralised session state initialisation  (Enhancement 3)
+# ---------------------------------------------------------------------------
+def _init_session_state() -> None:
+    """Ensure all expected session state keys exist with safe defaults."""
+    defaults = {
+        "current_page": "Beranda",
+        "user_id": None,
+        "user_alias": None,
+        "experience_level": None,
+        "last_session_id": None,
+    }
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+
+
+# ---------------------------------------------------------------------------
 # Sidebar — navigation + user info
 # ---------------------------------------------------------------------------
 def _sidebar() -> str:
@@ -59,10 +82,6 @@ def _sidebar() -> str:
             "Hasil Analisis & Umpan Balik",
             "Profil Kognitif Saya",
         ]
-
-        # Use session state to allow programmatic navigation
-        if "current_page" not in st.session_state:
-            st.session_state["current_page"] = "Beranda"
 
         selected = st.radio(
             "Navigasi",
@@ -133,17 +152,23 @@ def _page_beranda() -> None:
             st.error("Nama tidak boleh kosong.")
             return
 
-        with get_session() as sess:
-            user = sess.query(User).filter_by(alias=alias).first()
-            if user is None:
-                user = User(alias=alias, experience_level=experience)
-                sess.add(user)
-                sess.flush()
-                st.success(f"Akun baru dibuat untuk **{alias}**. Selamat datang!")
-            else:
-                st.info(f"Selamat datang kembali, **{alias}**!")
-            uid = user.id
-            exp = user.experience_level
+        try:
+            with get_session() as sess:
+                user = sess.query(User).filter_by(alias=alias).first()
+                if user is None:
+                    user = User(alias=alias, experience_level=experience)
+                    sess.add(user)
+                    sess.flush()
+                    logger.info("New user created: alias=%r", alias)
+                    st.success(f"Akun baru dibuat untuk **{alias}**. Selamat datang!")
+                else:
+                    logger.info("Existing user login: alias=%r id=%d", alias, user.id)
+                    st.info(f"Selamat datang kembali, **{alias}**!")
+                uid = user.id
+                exp = user.experience_level
+        except IntegrityError:
+            st.error("Alias sudah digunakan oleh akun lain. Silakan pilih alias berbeda.")
+            return
 
         st.session_state["user_id"] = uid
         st.session_state["user_alias"] = alias
@@ -285,6 +310,7 @@ def _page_hasil() -> None:
 # Router
 # ---------------------------------------------------------------------------
 def main() -> None:
+    _init_session_state()
     page = _sidebar()
 
     if page == "Beranda":

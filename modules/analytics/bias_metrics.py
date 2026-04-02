@@ -18,7 +18,7 @@ Public functions:
 """
 
 import math
-from datetime import datetime
+from datetime import datetime, timezone
 from statistics import mean, stdev
 
 from sqlalchemy.orm import Session
@@ -218,7 +218,7 @@ def compute_and_save_metrics(
         disposition_plr=plr,
         disposition_dei=dei,
         loss_aversion_index=lai,
-        computed_at=datetime.utcnow(),
+        computed_at=datetime.now(timezone.utc),
     )
     db_session.add(metric)
     db_session.flush()
