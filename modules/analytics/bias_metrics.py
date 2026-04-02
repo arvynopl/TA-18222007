@@ -23,12 +23,16 @@ from statistics import mean, stdev
 
 from sqlalchemy.orm import Session
 
+import logging
+
 from config import (
-    DEI_MODERATE, DEI_SEVERE,
-    LAI_MODERATE, LAI_SEVERE,
-    OCS_MODERATE, OCS_SEVERE,
+    DEI_MILD, DEI_MODERATE, DEI_SEVERE,
+    LAI_MILD, LAI_MODERATE, LAI_SEVERE,
+    OCS_MILD, OCS_MODERATE, OCS_SEVERE,
     ROUNDS_PER_SESSION,
 )
+
+logger = logging.getLogger(__name__)
 from database.models import BiasMetric
 from modules.analytics.features import SessionFeatures, extract_session_features
 
@@ -168,7 +172,10 @@ def compute_loss_aversion_index(features: SessionFeatures) -> float:
 # ---------------------------------------------------------------------------
 
 def classify_severity(
-    value: float, severe_threshold: float, moderate_threshold: float
+    value: float,
+    severe_threshold: float,
+    moderate_threshold: float,
+    mild_t: float | None = None,
 ) -> str:
     """Map a metric value to a severity label.
 
@@ -176,14 +183,17 @@ def classify_severity(
         value:              The computed metric value.
         severe_threshold:   Value at or above which severity = "severe".
         moderate_threshold: Value at or above which severity = "moderate".
+        mild_t:             Optional value at or above which severity = "mild".
 
     Returns:
-        "severe", "moderate", or "none".
+        "severe", "moderate", "mild", or "none".
     """
     if value >= severe_threshold:
         return "severe"
     if value >= moderate_threshold:
         return "moderate"
+    if mild_t is not None and value >= mild_t:
+        return "mild"
     return "none"
 
 
@@ -209,6 +219,14 @@ def compute_and_save_metrics(
     pgr, plr, dei = compute_disposition_effect(features)
     ocs = compute_overconfidence_score(features)
     lai = compute_loss_aversion_index(features)
+
+    ocs_sev = classify_severity(ocs, OCS_SEVERE, OCS_MODERATE, OCS_MILD)
+    dei_sev = classify_severity(abs(dei), DEI_SEVERE, DEI_MODERATE, DEI_MILD)
+    lai_sev = classify_severity(lai, LAI_SEVERE, LAI_MODERATE, LAI_MILD)
+    logger.debug(
+        "user=%s session=%s OCS=%.3f(%s) DEI=%.3f(%s) LAI=%.3f(%s)",
+        user_id, session_id[:8], ocs, ocs_sev, dei, dei_sev, lai, lai_sev,
+    )
 
     metric = BiasMetric(
         user_id=user_id,
