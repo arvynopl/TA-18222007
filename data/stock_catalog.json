@@ -1,0 +1,80 @@
+[
+  {
+    "stock_id": "BBCA.JK",
+    "ticker": "BBCA",
+    "name": "Bank Central Asia Tbk.",
+    "sector": "Finance",
+    "volatility_class": "low",
+    "bias_role": "Blue-chip anchor \u2014 tests disposition effect",
+    "data_start": "2024-04-02",
+    "data_end": "2026-04-02",
+    "total_records": 471,
+    "avg_close": 8404.58,
+    "avg_volume": 120511619
+  },
+  {
+    "stock_id": "TLKM.JK",
+    "ticker": "TLKM",
+    "name": "Telkom Indonesia Tbk.",
+    "sector": "Telecom",
+    "volatility_class": "low_medium",
+    "bias_role": "Stable dividend stock \u2014 rational baseline",
+    "data_start": "2024-04-02",
+    "data_end": "2026-04-02",
+    "total_records": 471,
+    "avg_close": 2863.33,
+    "avg_volume": 117505185
+  },
+  {
+    "stock_id": "ANTM.JK",
+    "ticker": "ANTM",
+    "name": "Aneka Tambang Tbk.",
+    "sector": "Mining",
+    "volatility_class": "high",
+    "bias_role": "Commodity volatility \u2014 triggers loss aversion & overconfidence",
+    "data_start": "2024-04-02",
+    "data_end": "2026-04-02",
+    "total_records": 471,
+    "avg_close": 2292.84,
+    "avg_volume": 128308159
+  },
+  {
+    "stock_id": "GOTO.JK",
+    "ticker": "GOTO",
+    "name": "GoTo Gojek Tokopedia Tbk.",
+    "sector": "Technology",
+    "volatility_class": "high",
+    "bias_role": "High-sentiment \u2014 elicits overtrading & emotional decisions",
+    "data_start": "2024-04-02",
+    "data_end": "2026-04-02",
+    "total_records": 471,
+    "avg_close": 64.44,
+    "avg_volume": 3797677410
+  },
+  {
+    "stock_id": "UNVR.JK",
+    "ticker": "UNVR",
+    "name": "Unilever Indonesia Tbk.",
+    "sector": "Consumer",
+    "volatility_class": "medium",
+    "bias_role": "Defensive with decline periods \u2014 tests holding losers",
+    "data_start": "2024-04-02",
+    "data_end": "2026-04-02",
+    "total_records": 471,
+    "avg_close": 1957.37,
+    "avg_volume": 33288332
+  },
+  {
+    "stock_id": "BBRI.JK",
+    "ticker": "BBRI",
+    "name": "Bank Rakyat Indonesia Tbk.",
+    "sector": "Finance",
+    "volatility_class": "medium",
+    "bias_role": "Widely held retail stock \u2014 familiar to pilot users",
+    "data_start": "2024-04-02",
+    "data_end": "2026-04-02",
+    "total_records": 471,
+    "avg_close": 3890.83,
+    "avg_volume": 250981278
+  }
+]
