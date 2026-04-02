@@ -136,18 +136,30 @@ def extract_session_features(
             features.hold_count += 1
 
     # Pass 2: final snapshot prices for open positions
-    # Use the last-round snapshot for each remaining holding
-    last_round = ROUNDS_PER_SESSION
-    last_round_actions = [a for a in actions if a.scenario_round == last_round]
+    # Query MarketSnapshot directly for each held stock at the window end date.
+    # This handles the case where a stock was HOLDed all 14 rounds (no sell action),
+    # which means snap_prices may not contain that stock's round-14 price.
+    last_round = max((a.scenario_round for a in actions), default=ROUNDS_PER_SESSION)
     last_prices: dict[str, float] = {}
-    for a in last_round_actions:
-        p = snap_prices.get(a.snapshot_id)
-        if p:
-            last_prices[a.stock_id] = p
+    if holdings and actions:
+        # Determine window end date from the snapshot of the chronologically last action
+        last_action = max(actions, key=lambda a: (a.scenario_round, a.timestamp))
+        last_snap = db_session.get(MarketSnapshot, last_action.snapshot_id)
+        window_end_date = last_snap.date if last_snap else None
+        if window_end_date:
+            for sid in holdings:
+                snap = (
+                    db_session.query(MarketSnapshot)
+                    .filter_by(stock_id=sid)
+                    .filter(MarketSnapshot.date == window_end_date)
+                    .first()
+                )
+                if snap:
+                    last_prices[sid] = snap.close
 
     open_positions: list[dict] = []
     for sid, h in holdings.items():
-        final_price = last_prices.get(sid, h["avg_price"])
+        final_price = last_prices.get(sid, h["avg_price"])  # fallback only if DB has no data
         open_positions.append({
             "stock_id": sid,
             "quantity": h["quantity"],

@@ -6,7 +6,7 @@ Seven entities:
     BiasMetric, CognitiveProfile, FeedbackHistory
 """
 
-from datetime import datetime, date as date_type
+from datetime import datetime, timezone, date as date_type
 from typing import Optional
 
 from sqlalchemy import (
@@ -31,7 +31,7 @@ class User(Base):
     experience_level: str = Column(
         String(20), nullable=False, default="beginner"
     )  # beginner | intermediate | advanced
-    created_at: datetime = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at: datetime = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     actions = relationship("UserAction", back_populates="user", lazy="dynamic")
@@ -123,7 +123,7 @@ class UserAction(Base):
     quantity: int = Column(Integer, nullable=False, default=0)
     action_value: float = Column(Float, nullable=False, default=0.0)
     response_time_ms: int = Column(Integer, nullable=False, default=0)
-    timestamp: datetime = Column(DateTime, nullable=False, default=datetime.utcnow)
+    timestamp: datetime = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     user = relationship("User", back_populates="actions")
@@ -157,16 +157,15 @@ class BiasMetric(Base):
     # Loss Aversion
     loss_aversion_index: Optional[float] = Column(Float, nullable=True)
 
-    computed_at: datetime = Column(DateTime, nullable=False, default=datetime.utcnow)
+    computed_at: datetime = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     user = relationship("User", back_populates="bias_metrics")
 
     def __repr__(self) -> str:
-        return (
-            f"<BiasMetric session={self.session_id[:8]} "
-            f"OCS={self.overconfidence_score:.3f} DEI={self.disposition_dei:.3f}>"
-        )
+        ocs = f"{self.overconfidence_score:.3f}" if self.overconfidence_score is not None else "None"
+        dei = f"{self.disposition_dei:.3f}" if self.disposition_dei is not None else "None"
+        return f"<BiasMetric session={self.session_id[:8]} OCS={ocs} DEI={dei}>"
 
 
 class CognitiveProfile(Base):
@@ -213,7 +212,7 @@ class FeedbackHistory(Base):
     severity: str = Column(String(10), nullable=False)     # none|mild|moderate|severe
     explanation_text: str = Column(Text, nullable=True)
     recommendation_text: str = Column(Text, nullable=True)
-    delivered_at: datetime = Column(DateTime, nullable=False, default=datetime.utcnow)
+    delivered_at: datetime = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     user = relationship("User", back_populates="feedback_history")
