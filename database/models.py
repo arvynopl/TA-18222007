@@ -33,14 +33,14 @@ class User(Base):
     )  # beginner | intermediate | advanced
     created_at: datetime = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
-    # Relationships
-    actions = relationship("UserAction", back_populates="user", lazy="dynamic")
-    bias_metrics = relationship("BiasMetric", back_populates="user", lazy="dynamic")
+    # Relationships — cascade delete ensures child rows are removed with the user
+    actions = relationship("UserAction", back_populates="user", lazy="dynamic", cascade="all, delete-orphan")
+    bias_metrics = relationship("BiasMetric", back_populates="user", lazy="dynamic", cascade="all, delete-orphan")
     cognitive_profile = relationship(
-        "CognitiveProfile", back_populates="user", uselist=False
+        "CognitiveProfile", back_populates="user", uselist=False, cascade="all, delete-orphan"
     )
     feedback_history = relationship(
-        "FeedbackHistory", back_populates="user", lazy="dynamic"
+        "FeedbackHistory", back_populates="user", lazy="dynamic", cascade="all, delete-orphan"
     )
 
     def __repr__(self) -> str:
@@ -230,4 +230,48 @@ class FeedbackHistory(Base):
         return (
             f"<FeedbackHistory {self.bias_type} severity={self.severity} "
             f"session={self.session_id[:8]}>"
+        )
+
+
+class ConsentLog(Base):
+    """Records user consent for research participation (UAT audit trail)."""
+
+    __tablename__ = "consent_logs"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    user_id: int = Column(Integer, ForeignKey("users.id"), nullable=False)
+    consent_given: bool = Column(Boolean, nullable=False, default=False)
+    # Optional verbatim consent text snapshot for audit
+    consent_text: Optional[str] = Column(Text, nullable=True)
+    # SHA-256 of remote IP for audit purposes (not PII linkable without original IP)
+    ip_hash: Optional[str] = Column(String(64), nullable=True)
+    created_at: datetime = Column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    def __repr__(self) -> str:
+        return f"<ConsentLog user={self.user_id} given={self.consent_given}>"
+
+
+class SessionSummary(Base):
+    """Summary record for each simulation session (tracks lifecycle)."""
+
+    __tablename__ = "session_summaries"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    user_id: int = Column(Integer, ForeignKey("users.id"), nullable=False)
+    session_id: str = Column(String(36), unique=True, nullable=False)
+    started_at: datetime = Column(DateTime, nullable=False)
+    completed_at: Optional[datetime] = Column(DateTime, nullable=True)
+    rounds_completed: int = Column(Integer, nullable=False, default=0)
+    final_portfolio_value: Optional[float] = Column(Float, nullable=True)
+    window_start_date: Optional[date_type] = Column(Date, nullable=True)
+    window_end_date: Optional[date_type] = Column(Date, nullable=True)
+    # in_progress | completed | abandoned
+    status: str = Column(String(20), nullable=False, default="in_progress")
+
+    def __repr__(self) -> str:
+        return (
+            f"<SessionSummary user={self.user_id} session={self.session_id[:8]}"
+            f" status={self.status}>"
         )
