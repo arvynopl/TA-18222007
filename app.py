@@ -12,6 +12,7 @@ Run with:
 """
 
 import logging
+import re
 
 import plotly.graph_objects as go
 import streamlit as st
@@ -245,8 +246,11 @@ def _page_beranda() -> None:
 
     if submitted:
         alias = alias.strip()
-        if not alias:
-            st.error("Nama tidak boleh kosong.")
+        if not alias or len(alias) < 2:
+            st.error("Nama harus minimal 2 karakter.")
+            return
+        if not re.match(r'^[a-zA-Z0-9 ]+$', alias):
+            st.error("Nama hanya boleh mengandung huruf, angka, dan spasi.")
             return
 
         try:
