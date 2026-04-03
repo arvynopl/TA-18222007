@@ -171,7 +171,7 @@ def test_full_pipeline_creates_all_records(db, user):
     action_count = db.query(UserAction).filter_by(
         user_id=user.id, session_id=session_id
     ).count()
-    assert action_count == 14 * 6, f"Expected 84 actions, got {action_count}"
+    assert action_count == 14 * len(STOCKS), f"Expected {14 * len(STOCKS)} actions, got {action_count}"
 
     # 2. Compute bias metrics
     metric = compute_and_save_metrics(db, user.id, session_id)
@@ -399,4 +399,134 @@ def test_mild_severity_classification():
     assert feedback_records[0].severity == "mild", (
         f"Expected 'mild' for DEI={mild_dei:.3f}, got '{feedback_records[0].severity}'"
     )
+    sess.close()
+
+
+def test_full_pipeline_with_twelve_stocks():
+    """Full pipeline test with 12 stocks (6 original + 6 new IDX additions).
+
+    Verifies that the analytics pipeline handles the expanded stock universe:
+    14 rounds × 12 stocks = 168 UserActions expected.
+    """
+    TWELVE_STOCKS = [
+        ("BBCA.JK", "BBCA", "Finance", "low"),
+        ("TLKM.JK", "TLKM", "Telecom", "low_medium"),
+        ("ANTM.JK", "ANTM", "Mining", "high"),
+        ("GOTO.JK", "GOTO", "Technology", "high"),
+        ("UNVR.JK", "UNVR", "Consumer", "medium"),
+        ("BBRI.JK", "BBRI", "Finance", "medium"),
+        ("ASII.JK", "ASII", "Conglomerate", "medium"),
+        ("BMRI.JK", "BMRI", "Finance", "low_medium"),
+        ("ICBP.JK", "ICBP", "Consumer", "low"),
+        ("MDKA.JK", "MDKA", "Mining", "high"),
+        ("BRIS.JK", "BRIS", "Finance", "medium"),
+        ("EMTK.JK", "EMTK", "Media & Tech", "high"),
+    ]
+    TWELVE_PRICES = {
+        "BBCA.JK": 9000.0, "TLKM.JK": 3000.0, "ANTM.JK": 2000.0,
+        "GOTO.JK": 70.0, "UNVR.JK": 2000.0, "BBRI.JK": 4000.0,
+        "ASII.JK": 5000.0, "BMRI.JK": 5500.0, "ICBP.JK": 10000.0,
+        "MDKA.JK": 3000.0, "BRIS.JK": 2000.0, "EMTK.JK": 1500.0,
+    }
+
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    sess = Session()
+
+    for stock_id, ticker, sector, vol_class in TWELVE_STOCKS:
+        sess.add(StockCatalog(
+            stock_id=stock_id, ticker=ticker, name=f"{ticker} Corp",
+            sector=sector, volatility_class=vol_class, bias_role="test",
+        ))
+    sess.flush()
+
+    base_date = date(2024, 4, 2)
+    snap_ids: dict[str, list[int]] = {s[0]: [] for s in TWELVE_STOCKS}
+    for stock_id, _, _, _ in TWELVE_STOCKS:
+        price = TWELVE_PRICES[stock_id]
+        for day in range(50):
+            snap = MarketSnapshot(
+                stock_id=stock_id,
+                date=base_date + timedelta(days=day),
+                open=price, high=price * 1.01, low=price * 0.99,
+                close=price, volume=1_000_000,
+                ma_5=price, ma_20=price, rsi_14=50.0,
+                volatility_20d=0.02, trend="neutral", daily_return=0.0,
+            )
+            sess.add(snap)
+            sess.flush()
+            snap_ids[stock_id].append(snap.id)
+    sess.flush()
+
+    u = User(alias="twelve_stock_user", experience_level="beginner")
+    sess.add(u)
+    sess.flush()
+
+    session_id = str(uuid.uuid4())
+
+    # Log 14 rounds × 12 stocks; buy BBCA and MDKA in round 1, sell BBCA in round 14
+    bought_qty: dict[str, int] = {}
+    for rnd in range(1, 15):
+        for stock_id, _, _, _ in TWELVE_STOCKS:
+            sid_snaps = snap_ids[stock_id]
+            snap_id = sid_snaps[rnd - 1]
+            price = TWELVE_PRICES[stock_id]
+
+            if rnd == 1 and stock_id in ("BBCA.JK", "MDKA.JK"):
+                qty = 5
+                atype = "buy"
+                bought_qty[stock_id] = qty
+                val = qty * price
+            elif rnd == 14 and stock_id == "BBCA.JK" and stock_id in bought_qty:
+                qty = bought_qty[stock_id]
+                atype = "sell"
+                val = qty * price
+            else:
+                qty = 0
+                atype = "hold"
+                val = 0.0
+
+            log_action(
+                session=sess,
+                user_id=u.id,
+                session_id=session_id,
+                scenario_round=rnd,
+                stock_id=stock_id,
+                snapshot_id=snap_id,
+                action_type=atype,
+                quantity=qty,
+                action_value=val,
+                response_time_ms=500,
+            )
+    sess.flush()
+
+    # Verify action count: 14 rounds × 12 stocks = 168
+    action_count = sess.query(UserAction).filter_by(
+        user_id=u.id, session_id=session_id
+    ).count()
+    assert action_count == 14 * 12, f"Expected 168 actions, got {action_count}"
+
+    # Run full pipeline
+    metric = compute_and_save_metrics(sess, u.id, session_id)
+    assert 0.0 <= (metric.overconfidence_score or 0.0) <= 1.0
+    assert metric.disposition_dei is not None
+    assert metric.loss_aversion_index is not None
+
+    profile = update_profile(sess, u.id, metric, session_id)
+    assert profile.session_count == 1
+    assert 0.0 <= profile.risk_preference <= 1.0
+
+    features = extract_session_features(sess, u.id, session_id)
+    feedbacks = generate_feedback(
+        db_session=sess,
+        user_id=u.id,
+        session_id=session_id,
+        bias_metric=metric,
+        profile=profile,
+        realized_trades=features.realized_trades,
+        open_positions=features.open_positions,
+    )
+    assert len(feedbacks) == 3
+
     sess.close()

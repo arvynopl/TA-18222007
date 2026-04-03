@@ -41,8 +41,8 @@ See [UAT_GUIDE.md](UAT_GUIDE.md) for step-by-step instructions in Bahasa Indones
 The system implements a 5-stage pipeline repeated over multiple sessions:
 
 ```
-Simulation (14 rounds × 6 IDX stocks)
-    → Action Logging (UserAction table)
+Simulation (14 rounds × 12 IDX stocks, free-choice trading)
+    → Action Logging (UserAction table — auto-hold for non-traded stocks)
         → Feature Extraction (SessionFeatures)
             → Bias Metrics (DEI, OCS, LAI)
                 → CDT Profile Update (EMA)
@@ -65,7 +65,7 @@ RiskPreference(t) = β × ObservedRisk(t) + (1−β) × RiskPreference(t−1) [�
 StabilityIndex(t) = 1 − mean(σ_OCS, σ_DEI, σ_LAI) over last 5 sessions
 ```
 
-### Stock Universe (6 IDX Stocks)
+### Stock Universe (12 IDX Stocks)
 
 | Ticker | Company | Sector | Volatility |
 |--------|---------|--------|-----------|
@@ -75,6 +75,14 @@ StabilityIndex(t) = 1 − mean(σ_OCS, σ_DEI, σ_LAI) over last 5 sessions
 | GOTO.JK | GoTo Gojek Tokopedia | Technology | High |
 | UNVR.JK | Unilever Indonesia | Consumer | Medium |
 | BBRI.JK | Bank Rakyat Indonesia | Finance | Medium |
+| ASII.JK | Astra International | Conglomerate | Medium |
+| BMRI.JK | Bank Mandiri | Finance | Low-Medium |
+| ICBP.JK | Indofood CBP Sukses Makmur | Consumer | Low |
+| MDKA.JK | Merdeka Copper Gold | Mining | High |
+| BRIS.JK | Bank Syariah Indonesia | Finance | Medium |
+| EMTK.JK | Elang Mahkota Teknologi | Media & Tech | High |
+
+> **Note:** After cloning, run `python idx_data_acquisition.py` locally (requires internet + yfinance) to download market data for all 12 tickers, then `python -m database.seed` to populate the database.
 
 ---
 
