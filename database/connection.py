@@ -9,8 +9,10 @@ Usage:
         ...
 """
 
+from __future__ import annotations
+
 from contextlib import contextmanager
-from typing import Generator
+from typing import Generator, Optional
 
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
@@ -19,8 +21,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from config import DATABASE_URL
 from database.models import Base
 
-_engine: Engine | None = None
-_SessionFactory: sessionmaker | None = None
+_engine: Optional[Engine] = None
+_SessionFactory: Optional[sessionmaker] = None
 
 
 def get_engine() -> Engine:

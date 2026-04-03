@@ -8,6 +8,8 @@ Functions:
     compute_stability_index — Returns a float in [0, 1].
 """
 
+from __future__ import annotations
+
 import math
 
 from sqlalchemy.orm import Session

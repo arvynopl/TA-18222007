@@ -8,6 +8,8 @@ Classes:
     Portfolio  — Cash + holdings container with buy/sell/valuation logic.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Optional
 

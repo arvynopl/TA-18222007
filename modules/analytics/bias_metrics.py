@@ -1,6 +1,7 @@
 """
 modules/analytics/bias_metrics.py — Core behavioral bias formulas.
 
+
 References:
     Odean, T. (1998). Are Investors Reluctant to Realize Their Losses?
         Journal of Finance, 53(5), 1775–1798.
@@ -16,6 +17,8 @@ Public functions:
     classify_severity            → str
     compute_and_save_metrics     → BiasMetric
 """
+
+from __future__ import annotations
 
 import math
 from datetime import datetime, timezone
