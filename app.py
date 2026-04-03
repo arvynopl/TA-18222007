@@ -12,6 +12,7 @@ Run with:
 """
 
 import logging
+import os
 import re
 
 import plotly.graph_objects as go
@@ -24,8 +25,10 @@ from database.models import BiasMetric, CognitiveProfile, User
 from database.seed import run_seed
 from modules.feedback.renderer import render_feedback_page
 from modules.simulation.ui import render_simulation_page
+from modules.utils.log_config import configure_logging
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+# CDT_DEBUG=1 enables verbose DEBUG logging to app.log
+configure_logging(debug=bool(os.environ.get("CDT_DEBUG")))
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------

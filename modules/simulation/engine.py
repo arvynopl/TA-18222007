@@ -5,6 +5,8 @@ Selects a random contiguous 14-trading-day window from the MarketSnapshot
 table and exposes one day at a time to the simulation UI.
 """
 
+from __future__ import annotations
+
 import random
 from typing import Optional
 
