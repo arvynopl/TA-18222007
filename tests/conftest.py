@@ -21,6 +21,12 @@ STOCKS = [
     ("GOTO.JK", "GOTO", "GoTo Gojek Tokopedia", "Technology", "high"),
     ("UNVR.JK", "UNVR", "Unilever Indonesia", "Consumer", "medium"),
     ("BBRI.JK", "BBRI", "Bank Rakyat Indonesia", "Finance", "medium"),
+    ("ASII.JK", "ASII", "Astra International", "Conglomerate", "medium"),
+    ("BMRI.JK", "BMRI", "Bank Mandiri", "Finance", "low_medium"),
+    ("ICBP.JK", "ICBP", "Indofood CBP", "Consumer", "low"),
+    ("MDKA.JK", "MDKA", "Merdeka Copper Gold", "Mining", "high"),
+    ("BRIS.JK", "BRIS", "Bank Syariah Indonesia", "Finance", "medium"),
+    ("EMTK.JK", "EMTK", "Elang Mahkota Teknologi", "Media & Tech", "high"),
 ]
 
 BASE_PRICES = {
@@ -30,6 +36,12 @@ BASE_PRICES = {
     "GOTO.JK": 70.0,
     "UNVR.JK": 2000.0,
     "BBRI.JK": 4000.0,
+    "ASII.JK": 5000.0,
+    "BMRI.JK": 5500.0,
+    "ICBP.JK": 10000.0,
+    "MDKA.JK": 3000.0,
+    "BRIS.JK": 2000.0,
+    "EMTK.JK": 1500.0,
 }
 
 BASE_DATE = date(2024, 4, 2)
@@ -37,13 +49,17 @@ BASE_DATE = date(2024, 4, 2)
 
 @pytest.fixture()
 def db():
-    """Fresh in-memory SQLite database with stocks and 20 days of snapshots."""
+    """Fresh in-memory SQLite database with 12 stocks and 50 days of snapshots.
+
+    50 days ensures the SimulationEngine can always find a 14-day trading window
+    with at least 30 days of pre-window history available.
+    """
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
     sess = Session()
 
-    # Seed 6 stocks
+    # Seed 12 stocks
     for stock_id, ticker, name, sector, vol in STOCKS:
         sess.add(StockCatalog(
             stock_id=stock_id, ticker=ticker, name=name,
@@ -51,10 +67,10 @@ def db():
         ))
     sess.flush()
 
-    # Seed 20 days of market snapshots per stock
+    # Seed 50 days of market snapshots per stock
     for stock_id, _, _, _, _ in STOCKS:
         price = BASE_PRICES[stock_id]
-        for day in range(20):
+        for day in range(50):
             sess.add(MarketSnapshot(
                 stock_id=stock_id,
                 date=BASE_DATE + timedelta(days=day),

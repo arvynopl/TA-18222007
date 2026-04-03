@@ -74,25 +74,47 @@ Di halaman **Simulasi Investasi**, kamu akan bermain sebagai investor selama **1
 
 #### Penjelasan Simulasi
 - Setiap **putaran** mewakili satu hari perdagangan menggunakan data historis nyata.
-- Tersedia **6 saham IDX**: BBCA, TLKM, ANTM, GOTO, UNVR, BBRI.
-- Di setiap putaran, kamu memutuskan untuk setiap saham: **Tahan / Beli / Jual**.
+- Tersedia **12 saham IDX**: BBCA, TLKM, ANTM, GOTO, UNVR, BBRI, ASII, BMRI, ICBP, MDKA, BRIS, EMTK.
+- Kamu **bebas memilih** saham mana yang ingin kamu tradingkan di setiap putaran.
+- Saham yang tidak kamu konfirmasi secara otomatis dicatat sebagai **Tahan**.
+- **Modal awal**: Rp 10.000.000
+
+#### Tata Letak Halaman Simulasi
+
+Halaman simulasi dibagi menjadi dua area:
+
+**Kolom Kiri — Pilih Saham & Posisi:**
+- Daftar 12 saham tersedia dalam bentuk tombol pilihan (radio)
+- Klik nama saham untuk melihat grafik dan melakukan order
+- Di bawahnya terdapat ringkasan **Posisi Terbuka** yang kamu miliki saat ini
+
+**Kolom Kanan — Grafik & Panel Order:**
+- **Grafik candlestick** menampilkan riwayat harga 30 hari sebelum simulasi (abu-abu) dan harga selama simulasi (hijau/merah)
+- Di bawah grafik terdapat **indikator teknikal**: Harga, MA5, MA20, Tren, RSI
+- **Panel Order**: pilih aksi (Beli/Jual/Tahan) dan masukkan jumlah lembar, lalu klik **"Konfirmasi"**
 
 #### Cara Bermain
-1. Lihat **grafik harga** dan indikator teknikal (MA5, MA20, Tren) untuk setiap saham.
-2. Pilih keputusan di bawah setiap kartu saham:
-   - **Tahan** — tidak melakukan transaksi untuk saham ini
-   - **Beli** — masukkan jumlah lembar yang ingin dibeli
-   - **Jual** — masukkan jumlah lembar yang ingin dijual
-3. Setelah semua saham ditentukan, klik **"✅ Eksekusi Keputusan"**.
-4. Lanjutkan hingga putaran 14 selesai.
+1. **Pilih saham** yang ingin kamu analisis dari daftar di kolom kiri.
+2. Baca **grafik candlestick** dan indikator teknikal.
+3. Tentukan aksi di panel order: **Beli**, **Jual**, atau **Tahan**.
+4. Klik **"Konfirmasi"** untuk menyimpan keputusan saham tersebut.
+   - Keputusan yang dikonfirmasi muncul di daftar "Keputusan Putaran Ini" di kolom kiri.
+5. Pilih saham lain jika ingin menambah keputusan, atau langsung klik **"✅ Eksekusi Semua"**.
+6. Saham yang **tidak dikonfirmasi** otomatis tercatat sebagai **Tahan**.
+7. Lanjutkan hingga putaran 14 selesai.
 
-#### Tips Membaca Grafik
-- **Garis biru** = Harga penutupan harian
+> **Tips:** Tidak perlu trading setiap saham setiap putaran. Amati dulu, beli saat yakin.
+
+#### Tips Membaca Grafik Candlestick
+- **Candlestick hijau** = Harga penutupan naik dari pembukaan
+- **Candlestick merah** = Harga penutupan turun dari pembukaan
+- **Area abu-abu (kiri garis biru)** = Riwayat harga 30 hari SEBELUM simulasi dimulai — gunakan sebagai konteks historis
+- **Garis biru vertikal** = Titik awal simulasi ("Mulai Trading")
 - **Garis oranye putus-putus (MA5)** = Rata-rata harga 5 hari terakhir
 - **Garis hijau titik-titik (MA20)** = Rata-rata harga 20 hari terakhir
-- Jika harga di **atas MA** → tren naik (bullish)
-- Jika harga di **bawah MA** → tren turun (bearish)
-- **Modal awal**: Rp 10.000.000
+- Jika harga di **atas MA20** → tren naik (bullish)
+- Jika harga di **bawah MA20** → tren turun (bearish)
+- **RSI** di atas 70 → kondisi overbought; di bawah 30 → oversold
 
 ### Langkah 4 — Lihat Hasil Analisis
 
