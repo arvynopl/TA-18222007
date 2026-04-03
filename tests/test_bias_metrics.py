@@ -247,3 +247,19 @@ def test_classify_severity_boundary_severe():
 
 def test_classify_severity_boundary_moderate():
     assert classify_severity(0.15, 0.5, 0.15) == "moderate"
+
+
+def test_classify_severity_mild_level():
+    """Value between mild_t and moderate_t → 'mild'."""
+    assert classify_severity(0.10, 0.5, 0.15, mild_t=0.08) == "mild"
+
+
+def test_classify_severity_mild_boundary():
+    """At exactly mild_t → 'mild'; just below → 'none'."""
+    assert classify_severity(0.08, 0.5, 0.15, mild_t=0.08) == "mild"
+    assert classify_severity(0.07, 0.5, 0.15, mild_t=0.08) == "none"
+
+
+def test_classify_severity_mild_not_triggered_without_threshold():
+    """Existing 3-arg calls still return 'none' below moderate (no mild path)."""
+    assert classify_severity(0.10, 0.5, 0.15) == "none"
