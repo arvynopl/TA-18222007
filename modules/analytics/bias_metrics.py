@@ -116,6 +116,23 @@ def compute_overconfidence_score(features: SessionFeatures) -> float:
 
     OCS ∈ [0, 1]; higher = more overconfident.
 
+    Sigmoid normalization rationale:
+        The raw signal (trade_frequency / performance_ratio) is unbounded:
+        - Near-zero performance_ratio (catastrophic loss) drives raw → ∞ → OCS → 1.0
+        - Low trade frequency + strong performance → raw ≈ 0 → OCS ≈ 0.5.
+        Sigmoid maps any positive real to (0.5, 1.0), centering the "neutral" case
+        at 0.5 and letting heavy overtraders saturate toward 1.0.
+
+        Threshold calibration (14-round session, Barber & Odean 2000):
+            - Most-active quintile: trade_frequency ≈ 1.0, performance_ratio ≈ 0.85
+              → raw ≈ 1.18 → sigmoid(1.18) ≈ 0.76 → "severe" (OCS_SEVERE = 0.70) ✓
+            - Moderate trader:      trade_frequency ≈ 0.6, performance_ratio ≈ 0.95
+              → raw ≈ 0.63 → sigmoid(0.63) ≈ 0.65 → between "moderate" and "severe" ✓
+            - Buy-and-hold user:    trade_frequency ≈ 0.1, performance_ratio ≈ 1.05
+              → raw ≈ 0.10 → sigmoid(0.10) ≈ 0.52 → "none" ✓
+        This aligns with Barber & Odean's finding that the most-active quintile
+        underperforms passive investors by ~6.5 percentage points annually.
+
     Args:
         features: Extracted session features.
 

@@ -320,9 +320,32 @@ def _page_profil() -> None:
 
     # --- Summary metrics ---
     c1, c2, c3 = st.columns(3)
+    rp = profile_data["risk_preference"]
+    rp_label = (
+        "Agresif" if rp >= 0.6
+        else "Moderat" if rp >= 0.3
+        else "Konservatif"
+    )
     c1.metric("Total Sesi", profile_data["session_count"])
     c2.metric("Indeks Stabilitas", f"{profile_data['stability_index']:.2f}")
-    c3.metric("Preferensi Risiko", f"{profile_data['risk_preference']:.2f}")
+    c3.metric("Preferensi Risiko", f"{rp:.2f}", delta=rp_label, delta_color="off")
+
+    with st.expander("Apa itu Preferensi Risiko?"):
+        st.markdown(
+            """
+            **Preferensi Risiko** mencerminkan seberapa sering kamu memilih saham bervolatilitas
+            tinggi (misalnya ANTM, GOTO) dibandingkan saham konservatif (misalnya BBCA, TLKM).
+
+            | Skor | Kategori | Arti |
+            |------|----------|------|
+            | 0.6 – 1.0 | Agresif | Sering memilih saham berisiko tinggi |
+            | 0.3 – 0.6 | Moderat | Campuran saham berisiko sedang |
+            | 0.0 – 0.3 | Konservatif | Cenderung memilih saham stabil |
+
+            Nilai ini diperbarui menggunakan model *Exponential Moving Average* (EMA)
+            setelah setiap sesi, sehingga mencerminkan tren terbaru perilakumu.
+            """
+        )
 
     st.divider()
 
