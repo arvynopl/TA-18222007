@@ -117,11 +117,8 @@ def download_ticker(ticker: str, start: str, end: str) -> pd.DataFrame | None:
     raw = _compute_indicators(raw)
 
     raw["stock_id"] = ticker
+    raw["ticker"] = ticker.replace(".JK", "")
     raw["date"] = raw.index.astype(str)
-
-    # Round OHLC to 2 decimal places
-    for col in ("open", "high", "low", "close"):
-        raw[col] = raw[col].round(2)
 
     return raw.reset_index(drop=True)
 
@@ -133,8 +130,13 @@ def main() -> None:
     start_date = (datetime.now(timezone.utc) - timedelta(days=LOOKBACK_YEARS * 365)).strftime("%Y-%m-%d")
 
     all_frames: list[pd.DataFrame] = []
-    columns = ["stock_id", "date", "open", "high", "low", "close", "volume",
-               "ma_5", "ma_20", "rsi_14", "volatility_20d", "daily_return", "trend"]
+    # Column order matches the format produced by the original 6-stock acquisition script
+    columns = [
+        "date", "stock_id", "ticker",
+        "open", "high", "low", "close", "volume",
+        "ma_5", "ma_20", "rsi_14", "volatility_20d",
+        "trend", "daily_return",
+    ]
 
     for ticker in TICKERS:
         df = download_ticker(ticker, start_date, end_date)
