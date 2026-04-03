@@ -33,8 +33,17 @@ def _format_rupiah(value: float) -> str:
     return f"Rp {value:,.0f}"
 
 
-def _build_price_chart(stock_id: str, price_history: list[float], current_round: int) -> go.Figure:
-    """Build a compact Plotly line chart showing price history up to current round."""
+def _build_price_chart(
+    stock_id: str,
+    price_history: list[float],
+    current_round: int,
+    ma5_history: list[float] | None = None,
+    ma20_history: list[float] | None = None,
+) -> go.Figure:
+    """Build a compact Plotly line chart showing price history up to current round.
+
+    Optionally overlays MA5 and MA20 moving average traces.
+    """
     rounds = list(range(1, current_round + 1))
     prices = price_history[:current_round]
 
@@ -45,10 +54,24 @@ def _build_price_chart(stock_id: str, price_history: list[float], current_round:
         marker=dict(size=5),
         name=stock_id,
     ))
+    if ma5_history:
+        fig.add_trace(go.Scatter(
+            x=rounds, y=ma5_history[:current_round],
+            mode="lines", name="MA5",
+            line=dict(color="#ff7f0e", width=1, dash="dash"),
+        ))
+    if ma20_history:
+        fig.add_trace(go.Scatter(
+            x=rounds, y=ma20_history[:current_round],
+            mode="lines", name="MA20",
+            line=dict(color="#2ca02c", width=1, dash="dot"),
+        ))
+    has_ma = bool(ma5_history or ma20_history)
     fig.update_layout(
         height=150, margin=dict(l=0, r=0, t=20, b=20),
         xaxis_title=None, yaxis_title=None,
-        showlegend=False,
+        showlegend=has_ma,
+        legend=dict(orientation="h", y=-0.4, font=dict(size=10)) if has_ma else {},
         xaxis=dict(tickmode="linear", dtick=1),
     )
     return fig
@@ -278,8 +301,18 @@ def render_simulation_page() -> None:
                 ind_cols[1].caption(f"MA20: {_format_rupiah(ma20) if ma20 else '—'}")
                 ind_cols[2].caption(f"Tren: {trend.capitalize()}")
 
-                # Price chart
-                fig = _build_price_chart(sid, price_histories[sid], current_round)
+                # Price chart with MA overlays
+                ma5_hist = [
+                    window[sid][i]["ma_5"]
+                    for i in range(current_round)
+                    if window[sid][i].get("ma_5") is not None
+                ]
+                ma20_hist = [
+                    window[sid][i]["ma_20"]
+                    for i in range(current_round)
+                    if window[sid][i].get("ma_20") is not None
+                ]
+                fig = _build_price_chart(sid, price_histories[sid], current_round, ma5_hist or None, ma20_hist or None)
                 st.plotly_chart(fig, use_container_width=True, key=f"chart_{sid}_{current_round}")
 
                 # Action controls

@@ -4,6 +4,7 @@ config.py — Central configuration for the CDT Bias Detection System.
 All tunable parameters, thresholds, and paths are defined here.
 """
 
+import os
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -15,7 +16,7 @@ DATA_DIR = BASE_DIR / "data"
 # ---------------------------------------------------------------------------
 # Database
 # ---------------------------------------------------------------------------
-DATABASE_URL = f"sqlite:///{BASE_DIR / 'cdt_bias.db'}"
+DATABASE_URL = os.environ.get("CDT_DATABASE_URL", f"sqlite:///{BASE_DIR / 'cdt_bias.db'}")
 
 # ---------------------------------------------------------------------------
 # Simulation parameters
@@ -36,14 +37,17 @@ CDT_STABILITY_WINDOW: int = 5  # Number of past sessions used for stability inde
 # Disposition Effect Index (DEI)
 DEI_SEVERE: float = 0.5
 DEI_MODERATE: float = 0.15
+DEI_MILD: float = 0.05
 
 # Overconfidence Score (OCS)
 OCS_SEVERE: float = 0.7
 OCS_MODERATE: float = 0.4
+OCS_MILD: float = 0.2
 
 # Loss Aversion Index (LAI)
 LAI_SEVERE: float = 2.0
 LAI_MODERATE: float = 1.5
+LAI_MILD: float = 1.2
 
 # ---------------------------------------------------------------------------
 # Stock catalog
