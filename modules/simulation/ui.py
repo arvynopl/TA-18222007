@@ -5,6 +5,8 @@ Renders the 14-round investment simulation, logs all user actions, and
 triggers the full analytics + CDT + feedback pipeline after round 14.
 """
 
+from __future__ import annotations
+
 import time
 import uuid
 from datetime import datetime

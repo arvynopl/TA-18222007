@@ -10,6 +10,8 @@ Functions:
     get_longitudinal_summary — Summarise bias trends across all sessions.
 """
 
+from __future__ import annotations
+
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Optional

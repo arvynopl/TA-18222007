@@ -7,6 +7,8 @@ Functions:
     run_seed()                      — Convenience wrapper (creates session + calls both)
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import math

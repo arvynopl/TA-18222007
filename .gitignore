@@ -44,3 +44,7 @@ exports/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Log files
+app.log
+app.log.*

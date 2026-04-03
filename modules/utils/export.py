@@ -7,6 +7,8 @@ Functions:
     export_session_data      — Write per-table CSV files for a session to disk.
 """
 
+from __future__ import annotations
+
 import csv
 import logging
 from pathlib import Path
