@@ -16,12 +16,16 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+import logging
+
 from config import (
-    DEI_MODERATE, DEI_SEVERE,
-    LAI_MODERATE, LAI_SEVERE,
-    OCS_MODERATE, OCS_SEVERE,
+    DEI_MILD, DEI_MODERATE, DEI_SEVERE,
+    LAI_MILD, LAI_MODERATE, LAI_SEVERE,
+    OCS_MILD, OCS_MODERATE, OCS_SEVERE,
     ROUNDS_PER_SESSION,
 )
+
+logger = logging.getLogger(__name__)
 from database.models import BiasMetric, CognitiveProfile, FeedbackHistory, MarketSnapshot, UserAction
 from modules.analytics.bias_metrics import classify_severity
 from modules.feedback.templates import TEMPLATES
@@ -155,6 +159,7 @@ def generate_feedback(
             "value": abs(dei_val),
             "severe_t": DEI_SEVERE,
             "moderate_t": DEI_MODERATE,
+            "mild_t": DEI_MILD,
             "slots": {
                 "dei": dei_val,
                 "pgr": pgr_val,
@@ -169,6 +174,7 @@ def generate_feedback(
             "value": ocs_val,
             "severe_t": OCS_SEVERE,
             "moderate_t": OCS_MODERATE,
+            "mild_t": OCS_MILD,
             "slots": {
                 "ocs": ocs_val,
                 "trade_count": trade_count,
@@ -180,6 +186,7 @@ def generate_feedback(
             "value": lai_val,
             "severe_t": LAI_SEVERE,
             "moderate_t": LAI_MODERATE,
+            "mild_t": LAI_MILD,
             "slots": {
                 "lai": lai_val,
                 "counterfactual_text": counterfactual_la,
@@ -189,7 +196,8 @@ def generate_feedback(
 
     records: list[FeedbackHistory] = []
     for cfg in bias_configs:
-        severity = classify_severity(cfg["value"], cfg["severe_t"], cfg["moderate_t"])
+        severity = classify_severity(cfg["value"], cfg["severe_t"], cfg["moderate_t"], cfg.get("mild_t"))
+        logger.debug("bias=%s value=%.3f severity=%s", cfg["bias_type"], cfg["value"], severity)
 
         if severity == "none":
             explanation = (

@@ -45,6 +45,10 @@ class SessionFeatures:
     realized_trades: list = field(default_factory=list)
     open_positions: list = field(default_factory=list)
     response_times: list = field(default_factory=list)
+    # Derived timing and return metrics (populated at end of extract_session_features)
+    avg_response_time_ms: float = 0.0
+    max_response_time_ms: int = 0
+    portfolio_return_pct: float = 0.0
 
 
 def extract_session_features(
@@ -177,5 +181,14 @@ def extract_session_features(
     features.realized_trades = realized_trades
     features.open_positions = open_positions
     features.response_times = response_times
+
+    # Derived timing and return metrics
+    if response_times:
+        features.avg_response_time_ms = sum(response_times) / len(response_times)
+        features.max_response_time_ms = max(response_times)
+    features.portfolio_return_pct = (
+        (features.final_value - features.initial_value)
+        / max(features.initial_value, 1.0)
+    ) * 100.0
 
     return features

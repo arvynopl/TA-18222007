@@ -13,10 +13,14 @@ from typing import Sequence
 
 from sqlalchemy.orm import Session
 
+import logging
+
 from config import ALPHA, BETA, HIGH_VOLATILITY_CLASSES
 from database.models import BiasMetric, CognitiveProfile, UserAction, StockCatalog
 from modules.cdt.profile import get_or_create_profile
 from modules.cdt.stability import compute_stability_index
+
+logger = logging.getLogger(__name__)
 
 
 def update_profile(
@@ -62,6 +66,13 @@ def update_profile(
         "disposition": new_disp,
         "loss_aversion": new_la,
     }
+    logger.debug(
+        "user=%s EMA update: OC %.3f→%.3f  DISP %.3f→%.3f  LA %.3f→%.3f",
+        user_id,
+        old.get("overconfidence", 0.0), new_oc,
+        old.get("disposition", 0.0), new_disp,
+        old.get("loss_aversion", 0.0), new_la,
+    )
 
     # --- Risk preference EMA update ---
     # Observe the proportion of buy+sell actions on high-volatility stocks

@@ -324,3 +324,79 @@ def test_final_price_uses_market_not_cost_basis():
     assert pos["unrealized_pnl"] == pytest.approx((10_500.0 - 9_000.0) * 10)
 
     sess.close()
+
+
+def test_mild_severity_classification():
+    """Session with DEI in mild range (0.05–0.14) → FeedbackHistory severity=='mild'."""
+    from config import DEI_MILD, DEI_MODERATE
+    from modules.analytics.bias_metrics import classify_severity
+
+    # Verify threshold boundary is correct
+    assert DEI_MILD < DEI_MODERATE
+
+    # A value in the mild band
+    mid = (DEI_MILD + DEI_MODERATE) / 2
+    assert classify_severity(mid, 0.5, DEI_MODERATE, DEI_MILD) == "mild"
+
+    # Build a full pipeline that produces a mild DEI
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    sess = Session()
+
+    for stock_id, ticker, sector, vol_class in STOCKS:
+        sess.add(StockCatalog(
+            stock_id=stock_id, ticker=ticker, name=f"{ticker} Corp",
+            sector=sector, volatility_class=vol_class, bias_role="test",
+        ))
+    sess.flush()
+
+    base_date = date(2024, 4, 2)
+    for stock_id, _, _, _ in STOCKS:
+        price = PRICES[stock_id]
+        for day in range(20):
+            sess.add(MarketSnapshot(
+                stock_id=stock_id, date=base_date + timedelta(days=day),
+                open=price, high=price * 1.01, low=price * 0.99,
+                close=price, volume=1_000_000,
+                ma_5=price, ma_20=price, rsi_14=50.0,
+                volatility_20d=0.02, trend="neutral", daily_return=0.0,
+            ))
+    sess.flush()
+
+    u = User(alias="mild_user", experience_level="beginner")
+    sess.add(u)
+    sess.flush()
+
+    # Craft a session: buy 1 winner (sell at gain), hold 1 loser (open at loss)
+    # → PGR > 0, PLR = 0 → DEI > 0 but small (one trade each)
+    # With equal counts, DEI = PGR - PLR = 1/(1+0) - 0/(0+1) = 1 → too high
+    # Use: sell winner, hold losers, keep DEI between 0.05 and 0.15
+    # Easiest: use the bias_metrics API directly with a crafted BiasMetric
+    session_id = str(uuid.uuid4())
+    from database.models import BiasMetric, FeedbackHistory
+    from modules.cdt.profile import get_or_create_profile
+
+    # Directly create a BiasMetric with mild DEI
+    mild_dei = (DEI_MILD + DEI_MODERATE) / 2  # ~0.10
+    metric = BiasMetric(
+        user_id=u.id, session_id=session_id,
+        overconfidence_score=0.1,
+        disposition_pgr=mild_dei + 0.3, disposition_plr=0.3,
+        disposition_dei=mild_dei,
+        loss_aversion_index=1.0,
+    )
+    sess.add(metric)
+    sess.flush()
+
+    profile = get_or_create_profile(sess, u.id)
+    generate_feedback(sess, u.id, session_id, metric, profile)
+
+    feedback_records = sess.query(FeedbackHistory).filter_by(
+        user_id=u.id, session_id=session_id, bias_type="disposition_effect"
+    ).all()
+    assert len(feedback_records) == 1
+    assert feedback_records[0].severity == "mild", (
+        f"Expected 'mild' for DEI={mild_dei:.3f}, got '{feedback_records[0].severity}'"
+    )
+    sess.close()
