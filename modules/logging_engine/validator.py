@@ -5,6 +5,8 @@ Functions:
     validate_session_completeness — Verify all 14 × 6 action slots are filled.
 """
 
+from __future__ import annotations
+
 from sqlalchemy.orm import Session
 
 from config import ROUNDS_PER_SESSION

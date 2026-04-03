@@ -7,6 +7,8 @@ Functions:
     render_longitudinal_section — Session-over-session comparison strip.
 """
 
+from __future__ import annotations
+
 import streamlit as st
 
 from database.connection import get_session

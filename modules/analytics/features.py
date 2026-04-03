@@ -5,6 +5,8 @@ Transforms raw UserAction rows into a structured SessionFeatures dataclass
 that the bias-metrics module consumes.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Optional
 

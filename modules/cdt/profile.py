@@ -6,6 +6,8 @@ Functions:
     get_profile           — Fetch (or None) for read-only access.
 """
 
+from __future__ import annotations
+
 from datetime import datetime
 
 from sqlalchemy.orm import Session
