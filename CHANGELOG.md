@@ -5,6 +5,40 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.3.0] — 2026-04-03 — UI/UX Overhaul & Critical Bug Fixes
+
+### Fixed (Critical)
+- **Bug A** (`simulation/ui.py`): `sim_engine` session_state key was never set, causing the window to re-randomize on every Streamlit rerun. Stock prices changed whenever the user clicked +/- on quantity inputs. Fixed by storing a boolean flag after window initialization.
+- **Bug B** (`feedback/renderer.py`): `DetachedInstanceError` on the feedback page — ORM objects were accessed outside the SQLAlchemy session. Fixed by serializing feedback rows to plain dicts inside the `with get_session()` block.
+- **Bug C** (`simulation/ui.py`): Quantity input rerun instability — each widget interaction triggered a full page rerun. Fixed by wrapping order controls in per-stock `st.form()`, batching all inputs and only submitting once.
+
+### Added — Simulation UI (Trading Platform Paradigm)
+- `simulation/ui.py`: Complete rewrite with trading-platform layout (left sidebar + right chart/order panel)
+- `simulation/ui.py`: Candlestick chart (`_build_full_chart`) showing 30 days of pre-window history (dimmed) + trading window (colored), with MA5/MA20 overlays and "Mulai Trading" vertical marker
+- `simulation/ui.py`: Stock selector radio in left sidebar — users view one stock at a time
+- `simulation/ui.py`: Per-stock order form (`st.form`) with Beli/Jual/Tahan radio, quantity input, estimated cost/P&L caption
+- `simulation/ui.py`: Pending orders accumulator — users confirm per-stock decisions, then execute all with a single "Eksekusi Semua" button
+- `simulation/ui.py`: `_execute_round()` helper — auto-logs "hold" for all non-interacted stocks
+- `simulation/ui.py`: Panduan Simulasi expander with candlestick reading guide in Bahasa Indonesia
+- `simulation/ui.py`: Holdings summary sidebar with P&L per open position
+- `simulation/engine.py`: `get_pre_window_history()` method — fetches `PRE_WINDOW_DAYS` of data before the trading window start date
+
+### Added — Stock Universe (6 → 12 stocks)
+- `data/stock_catalog.json`: Added ASII.JK, BMRI.JK, ICBP.JK, MDKA.JK, BRIS.JK, EMTK.JK
+- `idx_data_acquisition.py`: New data download script covering all 12 IDX tickers (run manually)
+- `config.py`: `PRE_WINDOW_DAYS = 30` constant
+
+### Added — Tests
+- `tests/test_free_choice.py`: 5 new tests for free-choice trading (partial stock coverage, auto-hold, full pipeline)
+- `tests/test_integration.py`: `test_full_pipeline_with_twelve_stocks` for the expanded 12-stock universe
+- `tests/conftest.py`: Updated to 12 stocks and 50 days of snapshots per stock
+
+### Changed
+- `tests/conftest.py`: Expanded from 6 to 12 stocks; snapshot count bumped 20 → 50 days
+- `tests/test_integration.py`: Action count assertion uses `14 * len(STOCKS)` (generalized)
+
+---
+
 ## [0.2.0] — 2026-04-03 — Hardening & UAT-Readiness Pass
 
 ### Fixed

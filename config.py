@@ -23,6 +23,7 @@ DATABASE_URL = os.environ.get("CDT_DATABASE_URL", f"sqlite:///{BASE_DIR / 'cdt_b
 # ---------------------------------------------------------------------------
 INITIAL_CAPITAL: float = 10_000_000.0   # Rp 10,000,000
 ROUNDS_PER_SESSION: int = 14
+PRE_WINDOW_DAYS: int = 30               # Days of history shown before the trading window
 
 # ---------------------------------------------------------------------------
 # CDT update weights (EMA)

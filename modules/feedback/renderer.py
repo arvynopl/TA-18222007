@@ -120,8 +120,18 @@ def render_feedback_page(user_id: int, session_id: str) -> None:
     st.caption(f"Sesi: {session_id[:8]}…")
 
     with get_session() as sess:
-        feedbacks = get_session_feedback(sess, user_id, session_id)
+        raw_feedbacks = get_session_feedback(sess, user_id, session_id)
         summary = get_longitudinal_summary(sess, user_id)
+        # Serialize ORM objects to dicts before session closes
+        feedbacks = [
+            {
+                "bias_type": fb.bias_type,
+                "severity": fb.severity,
+                "explanation_text": fb.explanation_text or "",
+                "recommendation_text": fb.recommendation_text or "",
+            }
+            for fb in raw_feedbacks
+        ]
 
     if not feedbacks:
         st.warning("Belum ada data umpan balik untuk sesi ini.")
@@ -149,11 +159,11 @@ def render_feedback_page(user_id: int, session_id: str) -> None:
 
     for fb in feedbacks:
         render_bias_card(
-            bias_type=fb.bias_type,
-            severity=fb.severity,
-            explanation=fb.explanation_text or "",
-            recommendation=fb.recommendation_text or "",
-            prev_severity=prev_severities.get(fb.bias_type),
+            bias_type=fb["bias_type"],
+            severity=fb["severity"],
+            explanation=fb["explanation_text"],
+            recommendation=fb["recommendation_text"],
+            prev_severity=prev_severities.get(fb["bias_type"]),
         )
 
     render_longitudinal_section(user_id)
