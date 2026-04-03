@@ -12,7 +12,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from config import ROUNDS_PER_SESSION
+from config import PRE_WINDOW_DAYS, ROUNDS_PER_SESSION
 from database.models import MarketSnapshot, StockCatalog
 
 
@@ -181,6 +181,51 @@ class SimulationEngine:
             "stock_ids": self._stock_ids,
             "rounds": ROUNDS_PER_SESSION,
         }
+
+    def get_pre_window_history(self) -> dict[str, list[dict]]:
+        """Fetch PRE_WINDOW_DAYS of market data before the trading window.
+
+        Must be called while the DB session (self._db) is still active.
+
+        Returns:
+            Dict mapping stock_id → list of serialized snapshot dicts
+            (keys: date, open, high, low, close, volume, ma_5, ma_20),
+            ordered chronologically.
+        """
+        if self._start_date is None:
+            return {}
+
+        pre_snaps = (
+            self._db.query(MarketSnapshot)
+            .filter(
+                MarketSnapshot.date < self._start_date,
+                MarketSnapshot.stock_id.in_(self._stock_ids),
+            )
+            .order_by(MarketSnapshot.stock_id, MarketSnapshot.date.desc())
+            .all()
+        )
+
+        history: dict[str, list[dict]] = {}
+        for snap in pre_snaps:
+            if snap.stock_id not in history:
+                history[snap.stock_id] = []
+            if len(history[snap.stock_id]) < PRE_WINDOW_DAYS:
+                history[snap.stock_id].append({
+                    "date": snap.date,
+                    "open": snap.open,
+                    "high": snap.high,
+                    "low": snap.low,
+                    "close": snap.close,
+                    "volume": snap.volume,
+                    "ma_5": snap.ma_5,
+                    "ma_20": snap.ma_20,
+                })
+
+        # Reverse each list to chronological order
+        for sid in history:
+            history[sid].reverse()
+
+        return history
 
     @property
     def stock_ids(self) -> list[str]:
