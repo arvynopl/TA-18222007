@@ -121,7 +121,11 @@ def test_disposition_effect_only_paper_gains():
 # ---------------------------------------------------------------------------
 
 def test_overconfidence_high_frequency_poor_performance():
-    """14 trades + portfolio decline → OCS > 0.7."""
+    """14 trades + portfolio decline → OCS > 0.5 (moderate).
+
+    With new shifted-sigmoid formula:
+        raw = (14/14) / 0.85 = 1.176 → OCS = 2*(sigmoid(1.176)-0.5) ≈ 0.529
+    """
     features = make_features(
         buy_count=7,
         sell_count=7,
@@ -129,7 +133,7 @@ def test_overconfidence_high_frequency_poor_performance():
         final_value=8_500_000.0,   # 15% decline
     )
     ocs = compute_overconfidence_score(features)
-    assert ocs > 0.7, f"Expected OCS > 0.7, got {ocs:.4f}"
+    assert ocs > 0.5, f"Expected OCS > 0.5, got {ocs:.4f}"
 
 
 def test_overconfidence_low_frequency_good_performance():
@@ -154,6 +158,31 @@ def test_overconfidence_no_trades_returns_low():
     features = make_features(buy_count=0, sell_count=0)
     ocs = compute_overconfidence_score(features)
     assert 0.0 <= ocs <= 0.6
+
+
+def test_ocs_zero_trades_returns_zero():
+    """All-hold session (0 trades) → OCS = 0.0 exactly.
+
+    raw = 0 → sigmoid(0) = 0.5 → 2*(0.5-0.5) = 0.0
+    """
+    features = make_features(buy_count=0, sell_count=0)
+    ocs = compute_overconfidence_score(features)
+    assert ocs == pytest.approx(0.0), f"Expected OCS ≈ 0.0 for zero trades, got {ocs:.6f}"
+
+
+def test_ocs_single_buy_returns_near_zero():
+    """Single buy (1 trade, perf=1.0) → OCS < 0.05.
+
+    raw = (1/14) / 1.0 = 0.071 → OCS = 2*(sigmoid(0.071)-0.5) ≈ 0.036
+    """
+    features = make_features(
+        buy_count=1,
+        sell_count=0,
+        initial_value=10_000_000.0,
+        final_value=10_000_000.0,
+    )
+    ocs = compute_overconfidence_score(features)
+    assert ocs < 0.05, f"Expected OCS < 0.05 for single buy, got {ocs:.6f}"
 
 
 def test_overconfidence_bounded_zero_to_one():

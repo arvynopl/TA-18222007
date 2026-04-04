@@ -155,6 +155,18 @@ def init_simulation_session() -> None:
     """Initialise Streamlit session state for a new simulation session."""
     if "sim_session_id" not in st.session_state:
         st.session_state["sim_session_id"] = str(uuid.uuid4())
+        # Persist session start
+        from database.models import SessionSummary
+        from datetime import datetime, timezone
+        user_id = st.session_state.get("user_id")
+        if user_id:
+            with get_session() as sess:
+                sess.add(SessionSummary(
+                    user_id=user_id,
+                    session_id=st.session_state["sim_session_id"],
+                    started_at=datetime.now(timezone.utc),
+                    status="in_progress",
+                ))
 
     if "sim_portfolio" not in st.session_state:
         st.session_state["sim_portfolio"] = Portfolio(INITIAL_CAPITAL)
@@ -187,6 +199,10 @@ def init_simulation_session() -> None:
                 for sid, snaps in engine._window.items()
             }
             st.session_state["sim_stock_ids"] = engine.stock_ids
+            # Store window date range for SessionSummary
+            first_stock = engine.stock_ids[0]
+            st.session_state["sim_window_start"] = engine._window[first_stock][0].date
+            st.session_state["sim_window_end"] = engine._window[first_stock][-1].date
             # Fetch pre-window history while session is still active
             pre_history = engine.get_pre_window_history()
             st.session_state["sim_pre_history"] = pre_history
@@ -252,6 +268,18 @@ def _run_post_session_pipeline(user_id: int, session_id: str) -> None:
             realized_trades=features.realized_trades,
             open_positions=features.open_positions,
         )
+
+        # 5. Update session summary
+        from database.models import SessionSummary
+        from datetime import datetime, timezone
+        summary = sess.query(SessionSummary).filter_by(session_id=session_id).first()
+        if summary:
+            summary.status = "completed"
+            summary.completed_at = datetime.now(timezone.utc)
+            summary.rounds_completed = ROUNDS_PER_SESSION
+            summary.final_portfolio_value = features.final_value
+            summary.window_start_date = st.session_state.get("sim_window_start")
+            summary.window_end_date = st.session_state.get("sim_window_end")
 
 
 # ---------------------------------------------------------------------------

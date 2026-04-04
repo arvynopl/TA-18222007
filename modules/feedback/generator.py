@@ -130,6 +130,14 @@ def generate_feedback(
         .count()
     )
 
+    has_trades = (
+        bool(realized_trades)
+        or bool(open_positions)
+        or trade_count > 0
+        or (bias_metric.overconfidence_score or 0) > 1e-9
+        or (bias_metric.loss_aversion_index or 0) > 1e-9
+    )
+
     win_count = sum(1 for t in realized_trades if t["sell_price"] > t["buy_price"])
     loss_count = sum(1 for t in realized_trades if t["sell_price"] < t["buy_price"])
 
@@ -201,7 +209,19 @@ def generate_feedback(
         severity = classify_severity(cfg["value"], cfg["severe_t"], cfg["moderate_t"], cfg.get("mild_t"))
         logger.debug("bias=%s value=%.3f severity=%s", cfg["bias_type"], cfg["value"], severity)
 
-        if severity == "none":
+        if not has_trades:
+            severity = "none"
+            explanation = (
+                f"Data transaksi tidak cukup untuk menganalisis "
+                f"{cfg['bias_type'].replace('_', ' ')} pada sesi ini. "
+                f"Cobalah untuk melakukan beberapa transaksi beli dan jual "
+                f"pada sesi berikutnya agar sistem dapat mengevaluasi pola keputusanmu."
+            )
+            recommendation = (
+                "Lakukan setidaknya beberapa transaksi beli dan jual pada sesi berikutnya "
+                "untuk memungkinkan analisis bias yang bermakna."
+            )
+        elif severity == "none":
             explanation = (
                 f"Tidak terdeteksi bias {cfg['bias_type'].replace('_', ' ')} yang "
                 f"signifikan pada sesi ini. Pertahankan pola pengambilan keputusan "
