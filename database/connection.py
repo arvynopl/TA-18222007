@@ -29,9 +29,12 @@ def get_engine() -> Engine:
     """Return (and lazily create) the shared SQLAlchemy engine."""
     global _engine
     if _engine is None:
+        connect_args = {}
+        if DATABASE_URL.startswith("sqlite"):
+            connect_args["check_same_thread"] = False
         _engine = create_engine(
             DATABASE_URL,
-            connect_args={"check_same_thread": False},  # needed for SQLite + threads
+            connect_args=connect_args,
             echo=False,
         )
     return _engine

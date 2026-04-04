@@ -132,7 +132,7 @@ def _page_consent() -> None:
 
         Kamu akan diminta untuk menyelesaikan **1–3 sesi simulasi investasi** menggunakan
         data historis saham IDX. Setiap sesi terdiri dari 14 putaran di mana kamu memutuskan
-        untuk membeli, menjual, atau menahan 6 saham IDX pilihan. Setelah setiap sesi, sistem
+        untuk membeli, menjual, atau menahan 12 saham IDX pilihan. Setelah setiap sesi, sistem
         akan menganalisis pola keputusanmu dan memberikan umpan balik personal.
 
         Estimasi waktu per sesi: **15–20 menit**.
@@ -196,7 +196,7 @@ def _page_beranda() -> None:
 
         ### Cara Kerja
         1. **Simulasi** — Kamu akan memainkan 14 putaran investasi menggunakan data
-           historis 6 saham IDX nyata.
+           historis 12 saham IDX nyata.
         2. **Analisis** — Setelah sesi selesai, sistem menghitung tiga metrik bias kognitif:
            - *Efek Disposisi* — Kecenderungan menjual saham untung terlalu cepat
            - *Overconfidence* — Terlalu sering trading dengan hasil kurang optimal
@@ -230,6 +230,20 @@ def _page_beranda() -> None:
             c2.metric("Sesi Terakhir", "—")
         if session_count == 0:
             st.info("Kamu belum menyelesaikan sesi simulasi. Mulai sekarang!")
+        elif session_count < 3:
+            st.warning(
+                f"Kamu telah menyelesaikan {session_count} dari minimal 3 sesi. "
+                f"Selesaikan {3 - session_count} sesi lagi untuk analisis longitudinal yang bermakna."
+            )
+        else:
+            st.success(
+                f"Kamu telah menyelesaikan {session_count} sesi — cukup untuk analisis longitudinal. "
+                f"Kamu bisa melanjutkan sesi tambahan untuk memperkaya profil kognitifmu."
+            )
+
+        if st.button("🚀 Mulai Sesi Simulasi Baru", use_container_width=True, type="primary"):
+            st.session_state["current_page"] = "Simulasi Investasi"
+            st.rerun()
 
     st.divider()
     st.subheader("Login / Daftar")
@@ -277,6 +291,24 @@ def _page_beranda() -> None:
         st.session_state["user_id"] = uid
         st.session_state["user_alias"] = alias
         st.session_state["experience_level"] = exp
+
+        # Persist consent record for audit trail
+        if st.session_state.get("consent_given"):
+            from database.models import ConsentLog
+            try:
+                with get_session() as consent_sess:
+                    existing = consent_sess.query(ConsentLog).filter_by(
+                        user_id=uid, consent_given=True
+                    ).first()
+                    if not existing:
+                        consent_sess.add(ConsentLog(
+                            user_id=uid,
+                            consent_given=True,
+                            consent_text="Saya telah membaca informasi penelitian dan menyetujui partisipasi.",
+                        ))
+            except Exception:
+                logger.warning("Failed to persist consent log for user %d", uid)
+
         st.session_state["current_page"] = "Simulasi Investasi"
         st.rerun()
 
@@ -414,6 +446,35 @@ def _page_profil() -> None:
 
     if profile_data["last_updated_at"]:
         st.caption(f"Terakhir diperbarui: {profile_data['last_updated_at'].strftime('%d %b %Y %H:%M')}")
+
+    # --- Data Export Section ---
+    st.divider()
+    st.subheader("Ekspor Data")
+    st.caption("Unduh data sesi untuk evaluasi dan analisis lebih lanjut.")
+
+    import io
+    import csv
+    from modules.utils.export import export_user_history_csv
+
+    with get_session() as export_sess:
+        history_rows = export_user_history_csv(export_sess, user_id)
+
+    if history_rows:
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=history_rows[0].keys())
+        writer.writeheader()
+        writer.writerows(history_rows)
+        csv_data = output.getvalue()
+
+        st.download_button(
+            label="📥 Unduh Riwayat Sesi (CSV)",
+            data=csv_data,
+            file_name=f"cdt_history_{st.session_state.get('user_alias', 'user')}.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+    else:
+        st.info("Belum ada data sesi untuk diekspor.")
 
 
 # ---------------------------------------------------------------------------
