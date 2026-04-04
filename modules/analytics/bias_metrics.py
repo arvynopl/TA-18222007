@@ -155,11 +155,21 @@ def compute_loss_aversion_index(features: SessionFeatures) -> float:
 
     LAI > 1 indicates holding losers longer; LAI ≫ 1 indicates strong aversion.
 
+    Edge-case semantics (by design — consistent with Odean 1998 counting approach):
+        - No realized trades at all → LAI = 0.0  ("insufficient data"; not "no aversion")
+        - Only winning trades sold  → avg_losers = 0.0  → LAI = 0.0
+          Interpretation: user never held losers, so no loss-aversion signal.
+        - Only losing trades sold   → avg_winners = 0.0 → denominator clamped to 1.0
+          → LAI = avg_losers (raw rounds). Can be > 1 without a winner baseline.
+
+    Callers should be aware that LAI = 0.0 may mean "no data" rather than
+    "zero loss aversion". Check features.realized_trades before interpreting.
+
     Args:
         features: Extracted session features.
 
     Returns:
-        Float ≥ 0; returns 1.0 if there are no completed sell trades.
+        Float ≥ 0.
     """
     loser_holds = [
         t["sell_round"] - t["buy_round"]
@@ -174,6 +184,22 @@ def compute_loss_aversion_index(features: SessionFeatures) -> float:
 
     avg_losers = mean(loser_holds) if loser_holds else 0.0
     avg_winners = mean(winner_holds) if winner_holds else 0.0
+
+    if not loser_holds and not winner_holds:
+        logger.debug(
+            "LAI: user=%s session=%s no realized trades — returning 0.0 (insufficient data)",
+            features.user_id, features.session_id,
+        )
+    elif not loser_holds:
+        logger.debug(
+            "LAI: user=%s session=%s only winning trades — returning 0.0 (no loser signal)",
+            features.user_id, features.session_id,
+        )
+    elif not winner_holds:
+        logger.debug(
+            "LAI: user=%s session=%s only losing trades — avg_winners clamped to 1.0",
+            features.user_id, features.session_id,
+        )
 
     return avg_losers / max(avg_winners, 1.0)
 

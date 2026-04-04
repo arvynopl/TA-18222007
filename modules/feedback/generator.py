@@ -141,19 +141,27 @@ def generate_feedback(
     win_count = sum(1 for t in realized_trades if t["sell_price"] > t["buy_price"])
     loss_count = sum(1 for t in realized_trades if t["sell_price"] < t["buy_price"])
 
-    # Counterfactual text (only for severe cases)
-    counterfactual_disp = compute_counterfactual(
-        db_session, realized_trades, open_positions, {}
+    # Pre-compute severities so counterfactuals are only generated when needed
+    dei_val_abs = abs(bias_metric.disposition_dei or 0.0)
+    dei_severity_pre = classify_severity(dei_val_abs, DEI_SEVERE, DEI_MODERATE, DEI_MILD)
+    ocs_val_pre = bias_metric.overconfidence_score or 0.0
+    lai_val_pre = bias_metric.loss_aversion_index or 0.0
+
+    # Counterfactual text — only computed for severe cases to avoid wasted work
+    counterfactual_disp = (
+        compute_counterfactual(db_session, realized_trades, open_positions, {})
+        if dei_severity_pre == "severe"
+        else ""
     )
     counterfactual_oc = (
         f"Dengan mengurangi frekuensi trading, kamu bisa menghemat lebih banyak modal "
         f"untuk peluang yang benar-benar menjanjikan."
-        if (bias_metric.overconfidence_score or 0) >= OCS_SEVERE else ""
+        if ocs_val_pre >= OCS_SEVERE else ""
     )
     counterfactual_la = (
         f"Posisi merugi yang kamu pertahankan mengunci modal yang bisa digunakan "
         f"untuk peluang investasi lainnya."
-        if (bias_metric.loss_aversion_index or 0) >= LAI_SEVERE else ""
+        if lai_val_pre >= LAI_SEVERE else ""
     )
 
     # Slot values

@@ -153,15 +153,15 @@ def extract_session_features(
         last_snap = db_session.get(MarketSnapshot, last_action.snapshot_id)
         window_end_date = last_snap.date if last_snap else None
         if window_end_date:
-            for sid in holdings:
-                snap = (
-                    db_session.query(MarketSnapshot)
-                    .filter_by(stock_id=sid)
-                    .filter(MarketSnapshot.date == window_end_date)
-                    .first()
-                )
-                if snap:
-                    last_prices[sid] = snap.close
+            # Batch-fetch all end-of-window prices in one query (avoids N+1)
+            end_snaps = (
+                db_session.query(MarketSnapshot)
+                .filter(MarketSnapshot.stock_id.in_(list(holdings.keys())))
+                .filter(MarketSnapshot.date == window_end_date)
+                .all()
+            )
+            for snap in end_snaps:
+                last_prices[snap.stock_id] = snap.close
 
     open_positions: list[dict] = []
     for sid, h in holdings.items():
