@@ -48,3 +48,4 @@ htmlcov/
 # Log files
 app.log
 app.log.*
+.claude/
