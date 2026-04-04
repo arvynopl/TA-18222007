@@ -1,3 +1,7 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # CDT Bias Detection System — Developer Context for Claude Code
 
 ## Project Identity
@@ -9,8 +13,9 @@ Author: Arvyno Pranata Limahardja (NIM: 18222007).
 ```bash
 streamlit run app.py          # Run the app (opens at http://localhost:8501)
 pytest tests/ -v              # Run full test suite (target: 85 passed, 0 failed)
-pytest tests/ -v --tb=short   # Run with compact failure output
-python -m database.seed       # Re-seed the database (idempotent)
+pytest tests/ -v --tb=short            # Run with compact failure output
+pytest tests/test_bias_metrics.py -v   # Run a single test file
+python -m database.seed                # Re-seed the database (idempotent)
 bash setup.sh                 # One-command first-time setup
 ```
 
@@ -55,6 +60,7 @@ tests/
   test_counterfactual.py compute_counterfactual edge cases
   test_portfolio_extended.py  Additional Portfolio scenarios
   test_export.py         Data export utility tests
+  test_free_choice.py    Free-choice trading scenarios (partial stock coverage, auto-hold)
 ```
 
 ## Bias Formulas (DO NOT CHANGE)
@@ -88,8 +94,9 @@ tests/
 - Use `print()` in production code (use logging)
 - Commit `*.db` files (they are gitignored)
 
-## Environment Variable
+## Environment Variables
 ```bash
-export CDT_DATABASE_URL="sqlite:///path/to/db.db"   # override default
+export CDT_DATABASE_URL="sqlite:///path/to/db.db"   # override default DB location
 export CDT_DATABASE_URL="postgresql://..."           # for production
+export CDT_DEBUG=1                                   # enable verbose logging to app.log
 ```
