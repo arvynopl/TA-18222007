@@ -126,14 +126,24 @@ def _build_full_chart(
                 hovertemplate="MA20: %{y:,.0f}<extra></extra>",
             ))
 
-        # Vertical marker at window start
-        fig.add_vline(
+        # Vertical marker at window start (add_vline with annotation_text
+        # fails on date strings due to a Plotly internal mean() call, so
+        # use add_shape + add_annotation separately)
+        fig.add_shape(
+            type="line",
+            x0=win_dates[0], x1=win_dates[0],
+            y0=0, y1=1,
+            yref="paper",
+            line=dict(dash="dash", color="rgba(0,0,255,0.5)"),
+        )
+        fig.add_annotation(
             x=win_dates[0],
-            line_dash="dash",
-            line_color="rgba(0,0,255,0.5)",
-            annotation_text="Mulai Trading",
-            annotation_position="top right",
-            annotation_font_size=10,
+            y=1,
+            yref="paper",
+            text="Mulai Trading",
+            showarrow=False,
+            font=dict(size=10),
+            xanchor="left",
         )
 
     fig.update_layout(
