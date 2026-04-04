@@ -110,42 +110,33 @@ def _sigmoid(x: float) -> float:
 def compute_overconfidence_score(features: SessionFeatures) -> float:
     """Compute the Overconfidence Score (OCS) for a session.
 
-    High trading frequency combined with poor performance signals overconfidence
-    (Barber & Odean, 2000).
+    OCS = 2 × (sigmoid(raw) − 0.5), mapping [0,∞) → [0,1)
+    This preserves sigmoid smoothing while ensuring zero-activity → OCS = 0.
 
-    trade_frequency    = (buy_count + sell_count) / ROUNDS_PER_SESSION
-    performance_ratio  = final_value / initial_value
-    OCS                = sigmoid(trade_frequency × (1 / max(performance_ratio, 0.01)))
+    trade_frequency   = (buy_count + sell_count) / ROUNDS_PER_SESSION
+    performance_ratio = final_value / initial_value
+    raw               = trade_frequency / max(performance_ratio, 0.01)
 
-    OCS ∈ [0, 1]; higher = more overconfident.
-
-    Sigmoid normalization rationale:
-        The raw signal (trade_frequency / performance_ratio) is unbounded:
-        - Near-zero performance_ratio (catastrophic loss) drives raw → ∞ → OCS → 1.0
-        - Low trade frequency + strong performance → raw ≈ 0 → OCS ≈ 0.5.
-        Sigmoid maps any positive real to (0.5, 1.0), centering the "neutral" case
-        at 0.5 and letting heavy overtraders saturate toward 1.0.
-
-        Threshold calibration (14-round session, Barber & Odean 2000):
-            - Most-active quintile: trade_frequency ≈ 1.0, performance_ratio ≈ 0.85
-              → raw ≈ 1.18 → sigmoid(1.18) ≈ 0.76 → "severe" (OCS_SEVERE = 0.70) ✓
-            - Moderate trader:      trade_frequency ≈ 0.6, performance_ratio ≈ 0.95
-              → raw ≈ 0.63 → sigmoid(0.63) ≈ 0.65 → between "moderate" and "severe" ✓
-            - Buy-and-hold user:    trade_frequency ≈ 0.1, performance_ratio ≈ 1.05
-              → raw ≈ 0.10 → sigmoid(0.10) ≈ 0.52 → "none" ✓
-        This aligns with Barber & Odean's finding that the most-active quintile
-        underperforms passive investors by ~6.5 percentage points annually.
+    Threshold calibration (14-round session, Barber & Odean 2000):
+        - All-hold (0 trades):              raw = 0.000 → OCS = 0.000 → "none" ✓
+        - Buy-and-hold (1 trade, perf=1.0): raw = 0.071 → OCS = 0.036 → "none" ✓
+        - Moderate trader (8 trades, perf=0.95):
+                                            raw = 0.602 → OCS = 0.292 → "mild" ✓
+        - Active trader (14 trades, perf=0.85):
+                                            raw = 1.176 → OCS = 0.529 → "moderate" ✓
+        - Heavy overtrader (20+ trades equiv, perf=0.70):
+                                            raw = 2.041 → OCS = 0.770 → "severe" ✓
 
     Args:
         features: Extracted session features.
 
     Returns:
-        Float in [0, 1].
+        Float in [0, 1).
     """
     trade_frequency = (features.buy_count + features.sell_count) / ROUNDS_PER_SESSION
     performance_ratio = features.final_value / max(features.initial_value, 1.0)
-    raw = trade_frequency * (1.0 / max(performance_ratio, 0.01))
-    return _sigmoid(raw)
+    raw = trade_frequency / max(performance_ratio, 0.01)
+    return 2.0 * (_sigmoid(raw) - 0.5)
 
 
 # ---------------------------------------------------------------------------
