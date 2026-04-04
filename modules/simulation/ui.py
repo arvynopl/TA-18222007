@@ -27,6 +27,7 @@ from modules.analytics.features import extract_session_features
 from modules.cdt.updater import update_profile
 from modules.feedback.generator import generate_feedback
 from modules.logging_engine.logger import log_action
+from modules.logging_engine.validator import validate_session_completeness
 from modules.simulation.engine import SimulationEngine
 from modules.simulation.portfolio import Portfolio
 
@@ -174,39 +175,65 @@ def init_simulation_session() -> None:
     if "sim_engine" not in st.session_state:
         user_id = st.session_state.get("user_id")
         session_id = st.session_state["sim_session_id"]
-        with get_session() as sess:
-            engine = SimulationEngine(user_id, session_id, sess)
-            # Serialize window data (snapshots) to plain dicts
-            st.session_state["sim_window"] = {
-                sid: [
-                    {
-                        "id": snap.id,
-                        "stock_id": snap.stock_id,
-                        "date": snap.date,
-                        "open": snap.open,
-                        "high": snap.high,
-                        "low": snap.low,
-                        "close": snap.close,
-                        "volume": snap.volume,
-                        "ma_5": snap.ma_5,
-                        "ma_20": snap.ma_20,
-                        "rsi_14": snap.rsi_14,
-                        "trend": snap.trend,
-                        "daily_return": snap.daily_return,
-                    }
-                    for snap in snaps
-                ]
-                for sid, snaps in engine._window.items()
-            }
-            st.session_state["sim_stock_ids"] = engine.stock_ids
-            # Store window date range for SessionSummary
-            first_stock = engine.stock_ids[0]
-            st.session_state["sim_window_start"] = engine._window[first_stock][0].date
-            st.session_state["sim_window_end"] = engine._window[first_stock][-1].date
-            # Fetch pre-window history while session is still active
-            pre_history = engine.get_pre_window_history()
-            st.session_state["sim_pre_history"] = pre_history
-        st.session_state["sim_engine"] = True  # prevents re-init on every rerun
+        try:
+            with get_session() as sess:
+                engine = SimulationEngine(user_id, session_id, sess)
+                # Serialize window data (snapshots) to plain dicts
+                st.session_state["sim_window"] = {
+                    sid: [
+                        {
+                            "id": snap.id,
+                            "stock_id": snap.stock_id,
+                            "date": snap.date,
+                            "open": snap.open,
+                            "high": snap.high,
+                            "low": snap.low,
+                            "close": snap.close,
+                            "volume": snap.volume,
+                            "ma_5": snap.ma_5,
+                            "ma_20": snap.ma_20,
+                            "rsi_14": snap.rsi_14,
+                            "trend": snap.trend,
+                            "daily_return": snap.daily_return,
+                        }
+                        for snap in snaps
+                    ]
+                    for sid, snaps in engine._window.items()
+                }
+                st.session_state["sim_stock_ids"] = engine.stock_ids
+                # Store window date range for SessionSummary
+                if engine.stock_ids:
+                    first_stock = engine.stock_ids[0]
+                    st.session_state["sim_window_start"] = engine._window[first_stock][0].date
+                    st.session_state["sim_window_end"] = engine._window[first_stock][-1].date
+                # Fetch pre-window history while session is still active
+                pre_history = engine.get_pre_window_history()
+                st.session_state["sim_pre_history"] = pre_history
+            st.session_state["sim_engine"] = True  # prevents re-init on every rerun
+        except Exception:
+            # Engine failed to initialise — mark the orphaned SessionSummary as
+            # abandoned so it doesn't stay "in_progress" forever.
+            from database.models import SessionSummary
+            from datetime import datetime, timezone
+            _pipeline_logger.exception(
+                "user=%s session=%s engine init failed; marking session abandoned",
+                user_id, session_id,
+            )
+            try:
+                with get_session() as err_sess:
+                    summary = err_sess.query(SessionSummary).filter_by(session_id=session_id).first()
+                    if summary:
+                        summary.status = "abandoned"
+                        summary.completed_at = datetime.now(timezone.utc)
+            except Exception:
+                pass
+            # Clear the session_id so a new one will be created on retry
+            st.session_state.pop("sim_session_id", None)
+            st.error(
+                "Tidak dapat memuat data pasar untuk sesi ini. "
+                "Pastikan database sudah di-seed (`python -m database.seed`) lalu muat ulang halaman."
+            )
+            return
 
     if "sim_current_round" not in st.session_state:
         st.session_state["sim_current_round"] = 1
@@ -246,40 +273,81 @@ def reset_simulation() -> None:
 # Post-session pipeline
 # ---------------------------------------------------------------------------
 
+import logging as _logging
+_pipeline_logger = _logging.getLogger(__name__)
+
+
 def _run_post_session_pipeline(user_id: int, session_id: str) -> None:
-    """Trigger analytics → CDT update → feedback generation after session ends."""
-    with get_session() as sess:
-        # 1. Compute bias metrics
-        bias_metric = compute_and_save_metrics(sess, user_id, session_id)
+    """Trigger analytics → CDT update → feedback generation after session ends.
 
-        # 2. Extract features for feedback slot-filling
-        features = extract_session_features(sess, user_id, session_id)
+    On any failure, marks the session as "error" and re-raises so the caller
+    can show a user-facing message. This ensures SessionSummary never stays
+    "in_progress" after the pipeline exits.
+    """
+    from database.models import SessionSummary
+    from datetime import datetime, timezone
 
-        # 3. Update CDT profile
-        profile = update_profile(sess, user_id, bias_metric, session_id)
+    try:
+        with get_session() as sess:
+            # 0. Validate session completeness — warn if any rounds are missing
+            completeness = validate_session_completeness(sess, user_id, session_id)
+            if not completeness["is_complete"]:
+                _pipeline_logger.warning(
+                    "user=%s session=%s incomplete: %d/%d actions logged, "
+                    "missing rounds=%s",
+                    user_id, session_id,
+                    completeness["action_count"], completeness["expected_count"],
+                    completeness["missing_rounds"],
+                )
 
-        # 4. Generate feedback
-        generate_feedback(
-            db_session=sess,
-            user_id=user_id,
-            session_id=session_id,
-            bias_metric=bias_metric,
-            profile=profile,
-            realized_trades=features.realized_trades,
-            open_positions=features.open_positions,
+            # 1. Compute bias metrics
+            bias_metric = compute_and_save_metrics(sess, user_id, session_id)
+
+            # 2. Extract features for feedback slot-filling
+            features = extract_session_features(sess, user_id, session_id)
+
+            # 3. Update CDT profile
+            profile = update_profile(sess, user_id, bias_metric, session_id)
+
+            # 4. Generate feedback
+            generate_feedback(
+                db_session=sess,
+                user_id=user_id,
+                session_id=session_id,
+                bias_metric=bias_metric,
+                profile=profile,
+                realized_trades=features.realized_trades,
+                open_positions=features.open_positions,
+            )
+
+            # 5. Update session summary — only reached if all steps above succeed
+            summary = sess.query(SessionSummary).filter_by(session_id=session_id).first()
+            if summary:
+                summary.status = "completed"
+                summary.completed_at = datetime.now(timezone.utc)
+                summary.rounds_completed = ROUNDS_PER_SESSION
+                summary.final_portfolio_value = features.final_value
+                summary.window_start_date = st.session_state.get("sim_window_start")
+                summary.window_end_date = st.session_state.get("sim_window_end")
+
+    except Exception:
+        _pipeline_logger.exception(
+            "user=%s session=%s post-session pipeline failed; marking session as error",
+            user_id, session_id,
         )
-
-        # 5. Update session summary
-        from database.models import SessionSummary
-        from datetime import datetime, timezone
-        summary = sess.query(SessionSummary).filter_by(session_id=session_id).first()
-        if summary:
-            summary.status = "completed"
-            summary.completed_at = datetime.now(timezone.utc)
-            summary.rounds_completed = ROUNDS_PER_SESSION
-            summary.final_portfolio_value = features.final_value
-            summary.window_start_date = st.session_state.get("sim_window_start")
-            summary.window_end_date = st.session_state.get("sim_window_end")
+        # Mark session as error so it doesn't stay stuck as "in_progress"
+        try:
+            with get_session() as err_sess:
+                summary = err_sess.query(SessionSummary).filter_by(session_id=session_id).first()
+                if summary and summary.status != "completed":
+                    summary.status = "error"
+                    summary.completed_at = datetime.now(timezone.utc)
+        except Exception:
+            _pipeline_logger.exception(
+                "user=%s session=%s failed to update session status to error",
+                user_id, session_id,
+            )
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -359,7 +427,14 @@ def _execute_round(
     if next_round > ROUNDS_PER_SESSION and not st.session_state.get("sim_complete"):
         st.session_state["sim_complete"] = True
         with st.spinner("Menganalisis keputusan investasi kamu…"):
-            _run_post_session_pipeline(user_id, session_id)
+            try:
+                _run_post_session_pipeline(user_id, session_id)
+            except Exception:
+                st.error(
+                    "Terjadi kesalahan saat menganalisis sesi. "
+                    "Silakan hubungi administrator dengan kode sesi: "
+                    f"{session_id[:8]}"
+                )
 
     st.rerun()
 

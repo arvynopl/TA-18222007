@@ -186,3 +186,63 @@ def test_classify_severity_dei():
     assert classify_severity(0.65, 0.5, 0.15) == "severe"
     assert classify_severity(0.25, 0.5, 0.15) == "moderate"
     assert classify_severity(0.05, 0.5, 0.15) == "none"
+
+
+# ---------------------------------------------------------------------------
+# Edge-case: null/None BiasMetric fields
+# ---------------------------------------------------------------------------
+
+def test_generate_feedback_with_null_metrics(db, user):
+    """Null metric fields (None) are treated as 0.0 by the generator.
+
+    When all bias scores are None, every bias has severity='none' because
+    0.0 is below every mild threshold. The feedback should still be generated
+    (3 records), and no unfilled template placeholders should remain.
+    """
+    sid = str(uuid.uuid4())
+    metric = BiasMetric(
+        user_id=user.id,
+        session_id=sid,
+        overconfidence_score=None,
+        disposition_pgr=None,
+        disposition_plr=None,
+        disposition_dei=None,
+        loss_aversion_index=None,
+    )
+    db.add(metric)
+    db.flush()
+    profile = get_or_create_profile(db, user.id)
+
+    feedbacks = generate_feedback(db, user.id, sid, metric, profile)
+
+    assert len(feedbacks) == 3, "Should always produce 3 FeedbackHistory records"
+    for fb in feedbacks:
+        assert fb.explanation_text is not None
+        assert fb.severity in {"none", "mild", "moderate", "severe"}
+        if fb.explanation_text:
+            assert "{" not in fb.explanation_text, (
+                f"Unfilled placeholder in {fb.bias_type}: {fb.explanation_text}"
+            )
+
+
+def test_generate_feedback_null_dei_not_severe(db, user):
+    """None DEI field → treated as 0.0 → severity='none', not 'severe'."""
+    sid = str(uuid.uuid4())
+    metric = BiasMetric(
+        user_id=user.id,
+        session_id=sid,
+        overconfidence_score=0.0,
+        disposition_pgr=None,
+        disposition_plr=None,
+        disposition_dei=None,
+        loss_aversion_index=1.0,
+    )
+    db.add(metric)
+    db.flush()
+    profile = get_or_create_profile(db, user.id)
+
+    feedbacks = generate_feedback(db, user.id, sid, metric, profile)
+    disp_fb = next(f for f in feedbacks if f.bias_type == "disposition_effect")
+    assert disp_fb.severity == "none", (
+        f"None DEI should map to severity='none', got '{disp_fb.severity}'"
+    )

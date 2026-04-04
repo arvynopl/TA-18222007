@@ -292,3 +292,92 @@ def test_classify_severity_mild_boundary():
 def test_classify_severity_mild_not_triggered_without_threshold():
     """Existing 3-arg calls still return 'none' below moderate (no mild path)."""
     assert classify_severity(0.10, 0.5, 0.15) == "none"
+
+
+# ---------------------------------------------------------------------------
+# Edge-case: break-even trades in DEI
+# ---------------------------------------------------------------------------
+
+def test_disposition_effect_break_even_trades():
+    """Break-even sells (sell_price == buy_price) are excluded from both
+    realized_gains and realized_losses, per Odean (1998) counting convention.
+
+    With one break-even trade and one open paper gain:
+        realized_gains=0, realized_losses=0, paper_gains=1, paper_losses=0
+        PGR = 0/(0+1) = 0, PLR = 0/(0+0) = 0 (no denom → 0)
+        DEI = 0 - 0 = 0
+    """
+    features = make_features(
+        realized_trades=[
+            {"stock_id": "BBCA.JK", "buy_round": 1, "sell_round": 5,
+             "buy_price": 8000, "sell_price": 8000, "quantity": 100},  # break-even
+        ],
+        open_positions=[
+            {"stock_id": "TLKM.JK", "quantity": 100, "avg_price": 3000,
+             "final_price": 3500, "rounds_held": 5, "unrealized_pnl": 50000},
+        ],
+    )
+    pgr, plr, dei = compute_disposition_effect(features)
+    # Break-even trade contributes to neither realized_gains nor realized_losses
+    assert pgr == pytest.approx(0.0), f"PGR should be 0 (no realized gains), got {pgr}"
+    assert plr == pytest.approx(0.0), f"PLR should be 0 (no realized losses), got {plr}"
+    assert dei == pytest.approx(0.0), f"DEI should be 0, got {dei}"
+
+
+def test_disposition_effect_only_break_even_trades():
+    """All realized trades are break-even and all open positions are break-even too.
+    Every denominator is 0 → PGR=0, PLR=0, DEI=0.
+    """
+    features = make_features(
+        realized_trades=[
+            {"stock_id": "BBCA.JK", "buy_round": 1, "sell_round": 3,
+             "buy_price": 5000, "sell_price": 5000, "quantity": 50},
+            {"stock_id": "TLKM.JK", "buy_round": 2, "sell_round": 6,
+             "buy_price": 3000, "sell_price": 3000, "quantity": 200},
+        ],
+        open_positions=[
+            {"stock_id": "GOTO.JK", "quantity": 100, "avg_price": 80,
+             "final_price": 80, "rounds_held": 5, "unrealized_pnl": 0},
+        ],
+    )
+    pgr, plr, dei = compute_disposition_effect(features)
+    assert pgr == pytest.approx(0.0)
+    assert plr == pytest.approx(0.0)
+    assert dei == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
+# Edge-case: OCS with catastrophic portfolio loss
+# ---------------------------------------------------------------------------
+
+def test_overconfidence_catastrophic_loss():
+    """When performance_ratio < 0.01 (portfolio nearly wiped), the floor at 0.01
+    causes the raw ratio to be high, pushing OCS toward 1.0 for active traders.
+
+    raw = trade_frequency / max(performance_ratio, 0.01)
+    With 14 trades and final_value=1 (from 10M): performance_ratio ≈ 0.0000001
+    → max(performance_ratio, 0.01) = 0.01
+    → raw = 1.0 / 0.01 = 100 → sigmoid(100) ≈ 1.0 → OCS ≈ 1.0
+    """
+    features = make_features(
+        buy_count=7,
+        sell_count=7,
+        initial_value=10_000_000.0,
+        final_value=1.0,  # catastrophic loss
+    )
+    ocs = compute_overconfidence_score(features)
+    # Result should still be in [0, 1] and be close to 1.0
+    assert 0.0 <= ocs <= 1.0, f"OCS out of bounds: {ocs}"
+    assert ocs > 0.9, f"Expected OCS near 1.0 for catastrophic loss + max trades, got {ocs:.4f}"
+
+
+def test_overconfidence_catastrophic_loss_no_trades():
+    """Catastrophic loss with zero trades → OCS = 0.0 (no overconfidence signal)."""
+    features = make_features(
+        buy_count=0,
+        sell_count=0,
+        initial_value=10_000_000.0,
+        final_value=1.0,
+    )
+    ocs = compute_overconfidence_score(features)
+    assert ocs == pytest.approx(0.0)

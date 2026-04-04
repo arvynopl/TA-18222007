@@ -19,7 +19,7 @@ import plotly.graph_objects as go
 import streamlit as st
 from sqlalchemy.exc import IntegrityError
 
-from config import INITIAL_CAPITAL
+from config import INITIAL_CAPITAL, validate_config
 from database.connection import get_session, init_db
 from database.models import BiasMetric, CognitiveProfile, User
 from database.seed import run_seed
@@ -30,6 +30,10 @@ from modules.utils.log_config import configure_logging
 # CDT_DEBUG=1 enables verbose DEBUG logging to app.log
 configure_logging(debug=bool(os.environ.get("CDT_DEBUG")))
 logger = logging.getLogger(__name__)
+
+# Validate configuration at startup — raises ValueError immediately if thresholds
+# are misconfigured, rather than silently producing wrong severity scores later.
+validate_config()
 
 # ---------------------------------------------------------------------------
 # App-wide configuration
