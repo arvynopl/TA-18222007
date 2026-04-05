@@ -11,11 +11,29 @@ from __future__ import annotations
 
 import streamlit as st
 
+from config import (
+    DEI_MILD, DEI_MODERATE, DEI_SEVERE,
+    LAI_MILD, LAI_MODERATE, LAI_SEVERE,
+    OCS_MILD, OCS_MODERATE, OCS_SEVERE,
+)
 from database.connection import get_session
+from database.models import BiasMetric
 from modules.analytics.bias_metrics import classify_severity
 from modules.feedback.generator import get_longitudinal_summary, get_session_feedback
+from modules.utils.ui_helpers import (
+    BIAS_DESCRIPTIONS,
+    BIAS_NAMES,
+    SEVERITY_BG,
+    SEVERITY_COLORS,
+    SEVERITY_ICONS,
+    SEVERITY_LABELS,
+    build_severity_gauge,
+)
 
-# Severity → display colour (using Streamlit markdown colour syntax)
+# ---------------------------------------------------------------------------
+# Backward-compatible aliases (used by tests)
+# ---------------------------------------------------------------------------
+
 _SEVERITY_COLOUR = {
     "severe": "🔴",
     "moderate": "🟠",
@@ -23,19 +41,9 @@ _SEVERITY_COLOUR = {
     "none": "🟢",
 }
 
-_SEVERITY_LABEL = {
-    "severe": "Berat",
-    "moderate": "Sedang",
-    "mild": "Ringan",
-    "none": "Tidak Terdeteksi",
-}
+_SEVERITY_LABEL = SEVERITY_LABELS
 
-_BIAS_DISPLAY_NAME = {
-    "disposition_effect": "Efek Disposisi",
-    "overconfidence": "Overconfidence",
-    "loss_aversion": "Aversion terhadap Kerugian",
-}
-
+_BIAS_DISPLAY_NAME = BIAS_NAMES
 
 _SEVERITY_ORDER = ["none", "mild", "moderate", "severe"]
 
@@ -44,17 +52,23 @@ def _severity_delta(prev: str, curr: str) -> str:
     """Return a delta string comparing two severity labels (Bahasa Indonesia)."""
     prev_idx = _SEVERITY_ORDER.index(prev) if prev in _SEVERITY_ORDER else 0
     curr_idx = _SEVERITY_ORDER.index(curr) if curr in _SEVERITY_ORDER else 0
-    prev_label = _SEVERITY_LABEL.get(prev, prev)
-    curr_label = _SEVERITY_LABEL.get(curr, curr)
+    prev_label = SEVERITY_LABELS.get(prev, prev)
+    curr_label = SEVERITY_LABELS.get(curr, curr)
     if curr_idx < prev_idx:
-        return f"Sesi lalu: {prev_label} → Sesi ini: {curr_label} ↓"
+        return f"Sesi lalu: {prev_label} → Sesi ini: {curr_label} ↓ (membaik)"
     elif curr_idx > prev_idx:
-        return f"Sesi lalu: {prev_label} → Sesi ini: {curr_label} ↑"
+        return f"Sesi lalu: {prev_label} → Sesi ini: {curr_label} ↑ (meningkat)"
     return f"Sesi lalu: {prev_label} → Sesi ini: {curr_label} (tetap)"
 
 
-def render_bias_card(bias_type: str, severity: str, explanation: str, recommendation: str, prev_severity: str | None = None) -> None:
-    """Render a single bias feedback card with colour-coded severity badge.
+def render_bias_card(
+    bias_type: str,
+    severity: str,
+    explanation: str,
+    recommendation: str,
+    prev_severity: str | None = None,
+) -> None:
+    """Render a single bias feedback card with colour-coded left border.
 
     Args:
         bias_type:      e.g. "disposition_effect".
@@ -63,12 +77,44 @@ def render_bias_card(bias_type: str, severity: str, explanation: str, recommenda
         recommendation: Recommendation text (Bahasa Indonesia).
         prev_severity:  Severity from the previous session, if available.
     """
-    icon = _SEVERITY_COLOUR.get(severity, "⚪")
-    label = _SEVERITY_LABEL.get(severity, severity.capitalize())
-    title = _BIAS_DISPLAY_NAME.get(bias_type, bias_type.replace("_", " ").title())
+    color = SEVERITY_COLORS.get(severity, "#78909c")
+    bg = SEVERITY_BG.get(severity, "rgba(255,255,255,0.05)")
+    icon = SEVERITY_ICONS.get(severity, "⚪")
+    label = SEVERITY_LABELS.get(severity, severity)
+    title = BIAS_NAMES.get(bias_type, bias_type.replace("_", " ").title())
+    desc = BIAS_DESCRIPTIONS.get(bias_type, "")
 
+    # Styled card header with colored left border
+    st.markdown(
+        f"""
+        <div style="
+            border-left: 4px solid {color};
+            background: {bg};
+            border-radius: 8px;
+            padding: 16px 20px;
+            margin-bottom: 4px;
+        ">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <span style="font-size: 17px; font-weight: 600; color: white;">
+                    {icon} {title}
+                </span>
+                <span style="
+                    background: {color}22;
+                    color: {color};
+                    padding: 3px 10px;
+                    border-radius: 12px;
+                    font-size: 12px;
+                    font-weight: 500;
+                ">{label}</span>
+            </div>
+            <p style="color: #90A4AE; font-size: 12px; margin: 0;">{desc}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # Expander for detail content (expanded for non-none severity)
     with st.expander(f"{icon} {title} — {label}", expanded=(severity != "none")):
-        # Enhancement 6: show delta vs previous session if available
         if prev_severity is not None:
             delta_str = _severity_delta(prev_severity, severity)
             st.caption(delta_str)
@@ -83,7 +129,7 @@ def render_bias_card(bias_type: str, severity: str, explanation: str, recommenda
 
 
 def render_longitudinal_section(user_id: int) -> None:
-    """Show session-over-session severity history as a compact table.
+    """Show session-over-session severity history as a compact table + visual timeline.
 
     Args:
         user_id: ID of the user.
@@ -95,18 +141,46 @@ def render_longitudinal_section(user_id: int) -> None:
         return
 
     st.markdown("---")
-    st.subheader("Perbandingan Antar Sesi")
+    st.subheader("📈 Perjalanan Bias Antar Sesi")
+    st.caption("Warna menunjukkan intensitas bias dari sesi ke sesi. Penurunan = perbaikan.")
 
+    # Table format (backward-compatible with tests)
     rows = []
-    for i, sid in enumerate(summary["sessions"], start=1):
+    for i, _ in enumerate(summary["sessions"], start=1):
         row = {"Sesi": f"Sesi {i}"}
         for bias_type in ["disposition_effect", "overconfidence", "loss_aversion"]:
-            sev = summary["trend"][bias_type][i - 1] if i - 1 < len(summary["trend"][bias_type]) else "none"
-            icon = _SEVERITY_COLOUR.get(sev, "⚪")
-            row[_BIAS_DISPLAY_NAME[bias_type]] = f"{icon} {_SEVERITY_LABEL.get(sev, sev)}"
+            sev = (
+                summary["trend"][bias_type][i - 1]
+                if i - 1 < len(summary["trend"][bias_type])
+                else "none"
+            )
+            emoji = _SEVERITY_COLOUR.get(sev, "⚪")
+            row[BIAS_NAMES[bias_type]] = f"{emoji} {SEVERITY_LABELS.get(sev, sev)}"
         rows.append(row)
 
     st.table(rows)
+
+    # Visual color-coded timeline per bias (additional polish)
+    n_sessions = len(summary["sessions"])
+    for bias_type in ["disposition_effect", "overconfidence", "loss_aversion"]:
+        title = BIAS_NAMES.get(bias_type, bias_type)
+        st.markdown(f"**{title}**")
+        cols = st.columns(min(n_sessions, 8))
+        trend = summary["trend"].get(bias_type, [])
+        for i, col in enumerate(cols):
+            if i < len(trend):
+                sev = trend[i]
+                clr = SEVERITY_COLORS.get(sev, "#78909c")
+                lbl = SEVERITY_LABELS.get(sev, sev)
+                col.markdown(
+                    f"<div style='text-align:center; padding:6px; "
+                    f"border-radius:8px; background:{clr}22; "
+                    f"border: 1px solid {clr}44;'>"
+                    f"<div style='font-size:10px; color:#90A4AE;'>Sesi {i + 1}</div>"
+                    f"<div style='font-size:12px; color:{clr}; font-weight:600;'>{lbl}</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
 
 
 def render_feedback_page(user_id: int, session_id: str) -> None:
@@ -122,6 +196,16 @@ def render_feedback_page(user_id: int, session_id: str) -> None:
     with get_session() as sess:
         raw_feedbacks = get_session_feedback(sess, user_id, session_id)
         summary = get_longitudinal_summary(sess, user_id)
+        bias_metric = (
+            sess.query(BiasMetric)
+            .filter_by(user_id=user_id, session_id=session_id)
+            .first()
+        )
+        metric_data = {
+            "ocs": bias_metric.overconfidence_score or 0.0 if bias_metric else 0.0,
+            "dei": abs(bias_metric.disposition_dei or 0.0) if bias_metric else 0.0,
+            "lai": bias_metric.loss_aversion_index or 0.0 if bias_metric else 0.0,
+        }
         # Serialize ORM objects to dicts before session closes
         feedbacks = [
             {
@@ -137,10 +221,24 @@ def render_feedback_page(user_id: int, session_id: str) -> None:
         st.warning("Belum ada data umpan balik untuk sesi ini.")
         return
 
-    # Build previous-session severity lookup (Enhancement 6)
+    # --- Gauge summary strip ---
+    g1, g2, g3 = st.columns(3)
+    with g1:
+        sev = classify_severity(metric_data["ocs"], OCS_SEVERE, OCS_MODERATE, OCS_MILD)
+        fig = build_severity_gauge(metric_data["ocs"], 1.0, "Overconfidence", sev)
+        st.plotly_chart(fig, use_container_width=True)
+    with g2:
+        sev = classify_severity(metric_data["dei"], DEI_SEVERE, DEI_MODERATE, DEI_MILD)
+        fig = build_severity_gauge(metric_data["dei"], 1.0, "Efek Disposisi", sev)
+        st.plotly_chart(fig, use_container_width=True)
+    with g3:
+        sev = classify_severity(metric_data["lai"], LAI_SEVERE, LAI_MODERATE, LAI_MILD)
+        fig = build_severity_gauge(metric_data["lai"], 3.0, "Loss Aversion", sev)
+        st.plotly_chart(fig, use_container_width=True)
+
+    # Build previous-session severity lookup
     prev_severities: dict[str, str | None] = {}
     if len(summary["sessions"]) >= 2:
-        # Find index of current session in history
         try:
             curr_idx = summary["sessions"].index(session_id)
         except ValueError:

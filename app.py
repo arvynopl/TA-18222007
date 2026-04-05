@@ -17,6 +17,7 @@ import re
 
 import plotly.graph_objects as go
 import streamlit as st
+from plotly.subplots import make_subplots
 from sqlalchemy.exc import IntegrityError
 
 from config import INITIAL_CAPITAL, validate_config
@@ -121,60 +122,85 @@ def _sidebar() -> str:
 # ---------------------------------------------------------------------------
 def _page_consent() -> None:
     """UAT consent and research information page."""
-    st.title("Informasi Penelitian & Persetujuan Partisipasi")
+    st.markdown("# 📋 Informasi Penelitian & Persetujuan")
+    st.caption("Baca informasi berikut sebelum berpartisipasi dalam simulasi.")
 
-    st.markdown(
-        """
-        ## Tentang Penelitian Ini
+    tab_info, tab_data, tab_consent = st.tabs([
+        "ℹ️ Tentang Penelitian",
+        "🔒 Data yang Dikumpulkan",
+        "✅ Persetujuan",
+    ])
 
-        Sistem ini dikembangkan sebagai bagian dari penelitian tugas akhir di
-        **Institut Teknologi Bandung (ITB)**, Program Studi Sistem dan Teknologi Informasi.
-        Penelitian ini bertujuan untuk membangun sebuah *Cognitive Digital Twin* (CDT) yang
-        mampu mendeteksi dan memitigasi bias perilaku investor ritel di pasar modal Indonesia.
+    with tab_info:
+        st.markdown(
+            """
+            ## Tentang Penelitian Ini
 
-        ## Apa yang Akan Kamu Lakukan?
+            Sistem ini dikembangkan sebagai bagian dari penelitian tugas akhir di
+            **Institut Teknologi Bandung (ITB)**, Program Studi Sistem dan Teknologi Informasi.
+            Penelitian ini bertujuan untuk membangun sebuah *Cognitive Digital Twin* (CDT) yang
+            mampu mendeteksi dan memitigasi bias perilaku investor ritel di pasar modal Indonesia.
 
-        Kamu akan diminta untuk menyelesaikan **1–3 sesi simulasi investasi** menggunakan
-        data historis saham IDX. Setiap sesi terdiri dari 14 putaran di mana kamu memutuskan
-        untuk membeli, menjual, atau menahan 12 saham IDX pilihan. Setelah setiap sesi, sistem
-        akan menganalisis pola keputusanmu dan memberikan umpan balik personal.
+            ## Apa yang Akan Kamu Lakukan?
 
-        Estimasi waktu per sesi: **15–20 menit**.
+            Kamu akan diminta untuk menyelesaikan **1–3 sesi simulasi investasi** menggunakan
+            data historis saham IDX. Setiap sesi terdiri dari 14 putaran di mana kamu memutuskan
+            untuk membeli, menjual, atau menahan 12 saham IDX pilihan. Setelah setiap sesi, sistem
+            akan menganalisis pola keputusanmu dan memberikan umpan balik personal.
 
-        ## Data yang Dikumpulkan
-
-        Sistem ini mengumpulkan data berikut selama partisipasi:
-        - **Keputusan investasi** (beli / jual / tahan) beserta jumlah lembar saham
-        - **Waktu respons** untuk setiap keputusan (dalam milidetik)
-        - **Alias / nama panggilan** yang kamu masukkan saat login (bukan nama asli)
-
-        **Data tidak dikaitkan dengan identitas asli kamu.** Semua data disimpan secara
-        lokal dan hanya digunakan untuk keperluan penelitian akademis.
-        """
-    )
-
-    st.divider()
-
-    consent = st.checkbox(
-        "Saya telah membaca informasi di atas dan **menyetujui** partisipasi dalam penelitian ini.",
-        value=st.session_state.get("consent_given", False),
-        key="consent_checkbox",
-    )
-
-    if consent:
-        st.session_state["consent_given"] = True
-        st.success(
-            "Terima kasih atas persetujuanmu! Silakan lanjutkan ke halaman **Beranda** "
-            "untuk login dan memulai simulasi."
+            Estimasi waktu per sesi: **15–20 menit**.
+            """
         )
-        if st.button("Lanjut ke Beranda →", type="primary"):
-            st.session_state["current_page"] = "Beranda"
-            st.rerun()
-    else:
-        st.session_state["consent_given"] = False
-        st.info(
-            "Centang kotak di atas untuk menyetujui partisipasi dan membuka akses ke simulasi."
+
+    with tab_data:
+        st.markdown(
+            """
+            ## Data yang Dikumpulkan
+
+            Sistem ini mengumpulkan data berikut selama partisipasi:
+            - **Keputusan investasi** (beli / jual / tahan) beserta jumlah lembar saham
+            - **Waktu respons** untuk setiap keputusan (dalam milidetik)
+            - **Alias / nama panggilan** yang kamu masukkan saat login (bukan nama asli)
+
+            **Data tidak dikaitkan dengan identitas asli kamu.** Semua data disimpan secara
+            lokal dan hanya digunakan untuk keperluan penelitian akademis.
+
+            ## Kerahasiaan Data
+
+            - Tidak ada data pribadi yang dikumpulkan
+            - Data disimpan secara lokal di perangkat penyelenggara penelitian
+            - Partisipasi bersifat sukarela dan dapat dihentikan kapan saja
+            """
         )
+
+    with tab_consent:
+        st.markdown("## Persetujuan Partisipasi")
+        st.markdown(
+            "Dengan mencentang kotak di bawah, kamu menyatakan bahwa kamu telah membaca "
+            "informasi penelitian dan bersedia berpartisipasi secara sukarela."
+        )
+        st.divider()
+
+        consent = st.checkbox(
+            "Saya telah membaca informasi di atas dan **menyetujui** partisipasi dalam penelitian ini.",
+            value=st.session_state.get("consent_given", False),
+            key="consent_checkbox",
+        )
+
+        if consent:
+            st.session_state["consent_given"] = True
+            st.success(
+                "Terima kasih atas persetujuanmu! Silakan lanjutkan ke halaman **Beranda** "
+                "untuk login dan memulai simulasi."
+            )
+            if st.button("Lanjut ke Beranda →", type="primary"):
+                st.session_state["current_page"] = "Beranda"
+                st.rerun()
+        else:
+            st.session_state["consent_given"] = False
+            st.info(
+                "Centang kotak di atas untuk menyetujui partisipasi dan membuka akses ke simulasi."
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -193,24 +219,6 @@ def _page_beranda() -> None:
             st.rerun()
         return
 
-    st.markdown(
-        """
-        Sistem ini dirancang untuk membantu investor ritel memahami pola pengambilan
-        keputusan mereka melalui **simulasi investasi berbasis data historis saham IDX**.
-
-        ### Cara Kerja
-        1. **Simulasi** — Kamu akan memainkan 14 putaran investasi menggunakan data
-           historis 12 saham IDX nyata.
-        2. **Analisis** — Setelah sesi selesai, sistem menghitung tiga metrik bias kognitif:
-           - *Efek Disposisi* — Kecenderungan menjual saham untung terlalu cepat
-           - *Overconfidence* — Terlalu sering trading dengan hasil kurang optimal
-           - *Loss Aversion* — Menahan saham rugi terlalu lama
-        3. **Profil Kognitif** — Profilmu diperbarui setelah setiap sesi menggunakan
-           model *Cognitive Digital Twin* (CDT) berbasis EMA.
-        4. **Umpan Balik** — Kamu menerima penjelasan personal dan rekomendasi perbaikan.
-        """
-    )
-
     # Session history for logged-in users
     user_id = st.session_state.get("user_id")
     if user_id:
@@ -224,14 +232,26 @@ def _page_beranda() -> None:
             session_count = len(past)
             last_date = past[0].computed_at if past else None
 
+        # Prominent CTA at the top
+        if st.button("🚀 Mulai Sesi Simulasi Baru", use_container_width=True, type="primary"):
+            st.session_state["current_page"] = "Simulasi Investasi"
+            st.rerun()
+
         st.divider()
         st.subheader("Riwayat Sesimu")
+
         c1, c2 = st.columns(2)
         c1.metric("Total Sesi Selesai", session_count)
         if last_date:
             c2.metric("Sesi Terakhir", last_date.strftime("%d %b %Y %H:%M"))
         else:
             c2.metric("Sesi Terakhir", "—")
+
+        # Progress toward minimum 3 sessions
+        min_sessions = 3
+        progress_val = min(session_count / min_sessions, 1.0)
+        st.progress(progress_val, text=f"{session_count} / {min_sessions} sesi minimum tercapai")
+
         if session_count == 0:
             st.info("Kamu belum menyelesaikan sesi simulasi. Mulai sekarang!")
         elif session_count < 3:
@@ -245,9 +265,25 @@ def _page_beranda() -> None:
                 f"Kamu bisa melanjutkan sesi tambahan untuk memperkaya profil kognitifmu."
             )
 
-        if st.button("🚀 Mulai Sesi Simulasi Baru", use_container_width=True, type="primary"):
-            st.session_state["current_page"] = "Simulasi Investasi"
-            st.rerun()
+    with st.expander("ℹ️ Bagaimana sistem ini bekerja?", expanded=not bool(user_id)):
+        st.markdown(
+            """
+            Sistem ini dirancang untuk membantu investor ritel memahami pola pengambilan
+            keputusan mereka melalui **simulasi investasi berbasis data historis saham IDX**.
+
+            **4 Langkah Proses:**
+
+            1. **Simulasi** — Kamu akan memainkan 14 putaran investasi menggunakan data
+               historis 12 saham IDX nyata.
+            2. **Analisis** — Setelah sesi selesai, sistem menghitung tiga metrik bias kognitif:
+               - *Efek Disposisi* — Kecenderungan menjual saham untung terlalu cepat
+               - *Overconfidence* — Terlalu sering trading dengan hasil kurang optimal
+               - *Loss Aversion* — Menahan saham rugi terlalu lama
+            3. **Profil Kognitif** — Profilmu diperbarui setelah setiap sesi menggunakan
+               model *Cognitive Digital Twin* (CDT) berbasis EMA.
+            4. **Umpan Balik** — Kamu menerima penjelasan personal dan rekomendasi perbaikan.
+            """
+        )
 
     st.divider()
     st.subheader("Login / Daftar")
@@ -361,7 +397,14 @@ def _page_profil() -> None:
         st.info("Selesaikan setidaknya satu sesi simulasi untuk melihat profil kognitifmu.")
         return
 
-    # --- Summary metrics ---
+    from modules.utils.ui_helpers import (
+        apply_chart_theme, build_radar_chart, BIAS_NAMES, SEVERITY_COLORS,
+    )
+
+    # --- Summary metrics hero strip ---
+    st.markdown("### 🧠 Profil Kognitif Digital Twin")
+    st.caption("Representasi adaptif pola pengambilan keputusan investasimu, diperbarui setelah setiap sesi.")
+
     c1, c2, c3 = st.columns(3)
     rp = profile_data["risk_preference"]
     rp_label = (
@@ -369,9 +412,14 @@ def _page_profil() -> None:
         else "Moderat" if rp >= 0.3
         else "Konservatif"
     )
+    si = profile_data["stability_index"]
     c1.metric("Total Sesi", profile_data["session_count"])
-    c2.metric("Indeks Stabilitas", f"{profile_data['stability_index']:.2f}")
-    c3.metric("Preferensi Risiko", f"{rp:.2f}", delta=rp_label, delta_color="off")
+    c2.metric(
+        "Stabilitas",
+        f"{si:.0%}",
+        help="Seberapa konsisten pola biasmu antar sesi (100% = sangat konsisten)",
+    )
+    c3.metric("Preferensi Risiko", rp_label, delta=f"Skor: {rp:.2f}", delta_color="off")
 
     with st.expander("Apa itu Preferensi Risiko?"):
         st.markdown(
@@ -392,61 +440,75 @@ def _page_profil() -> None:
 
     st.divider()
 
-    # --- Radar chart ---
+    # --- Radar chart (shared themed component) ---
     bv = profile_data["bias_vector"]
-    categories = ["Overconfidence", "Efek Disposisi", "Loss Aversion"]
-    values = [
-        bv.get("overconfidence", 0.0),
-        bv.get("disposition", 0.0),
-        bv.get("loss_aversion", 0.0),
-    ]
-    # Close the polygon
-    values_closed = values + [values[0]]
-    categories_closed = categories + [categories[0]]
-
-    radar = go.Figure(go.Scatterpolar(
-        r=values_closed,
-        theta=categories_closed,
-        fill="toself",
-        fillcolor="rgba(31, 119, 180, 0.25)",
-        line=dict(color="rgba(31, 119, 180, 0.8)", width=2),
-        name="Intensitas Bias",
-    ))
-    radar.update_layout(
-        polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
-        showlegend=False,
-        title="Vektor Intensitas Bias (CDT)",
-        height=400,
-    )
+    radar = build_radar_chart(bv, "Vektor Intensitas Bias (CDT)")
     st.plotly_chart(radar, use_container_width=True)
 
     # --- Session history line chart ---
     if len(metrics_data) >= 2:
-        st.subheader("Riwayat Metrik per Sesi")
+        st.subheader("📊 Riwayat Metrik per Sesi")
         sessions = [f"Sesi {d['session_num']}" for d in metrics_data]
 
         line_fig = go.Figure()
         line_fig.add_trace(go.Scatter(
             x=sessions, y=[d["ocs"] for d in metrics_data],
             mode="lines+markers", name="Overconfidence (OCS)",
-            line=dict(color="#e74c3c"),
+            line=dict(color=SEVERITY_COLORS["mild"], width=2),
+            marker=dict(size=8),
         ))
         line_fig.add_trace(go.Scatter(
             x=sessions, y=[d["dei"] for d in metrics_data],
             mode="lines+markers", name="Efek Disposisi |DEI|",
-            line=dict(color="#f39c12"),
+            line=dict(color=SEVERITY_COLORS["moderate"], width=2),
+            marker=dict(size=8),
         ))
         line_fig.add_trace(go.Scatter(
             x=sessions, y=[d["lai_norm"] for d in metrics_data],
-            mode="lines+markers", name="Loss Aversion (LAI/3)",
-            line=dict(color="#9b59b6"),
+            mode="lines+markers", name="Loss Aversion (norm)",
+            line=dict(color=SEVERITY_COLORS["severe"], width=2),
+            marker=dict(size=8),
         ))
-        line_fig.update_layout(
-            yaxis=dict(range=[0, 1], title="Intensitas (0–1)"),
-            height=350,
-            legend=dict(orientation="h", y=-0.2),
-        )
+        line_fig.update_yaxes(title_text="Intensitas Bias (0–1)", range=[0, 1])
+        apply_chart_theme(line_fig, height=380)
         st.plotly_chart(line_fig, use_container_width=True)
+
+    # --- Insight section ---
+    st.subheader("💡 Insight")
+    if bv:
+        max_bias = max(bv, key=bv.get)
+        max_val = bv[max_bias]
+        bias_name = BIAS_NAMES.get(max_bias, max_bias)
+
+        if max_val < 0.15:
+            st.success(
+                "Profil biasmu menunjukkan pola pengambilan keputusan yang sehat secara keseluruhan. "
+                "Terus pertahankan pendekatan analitis dalam setiap keputusan investasi."
+            )
+        elif max_val < 0.4:
+            st.info(
+                f"Kecenderungan tertinggimu saat ini adalah **{bias_name}** "
+                f"(intensitas: {max_val:.2f}). Ini masih dalam batas ringan, namun perlu "
+                f"dipantau agar tidak meningkat di sesi-sesi mendatang."
+            )
+        else:
+            st.warning(
+                f"Perhatian: **{bias_name}** menunjukkan intensitas {max_val:.2f}. "
+                f"Fokuslah pada rekomendasi yang diberikan di halaman Hasil Analisis "
+                f"untuk mengurangi kecenderungan ini."
+            )
+
+        if profile_data["session_count"] >= 3:
+            if si > 0.8:
+                st.caption(
+                    "📌 Pola biasmu sangat konsisten antar sesi — baik jika kamu sudah di zona sehat, "
+                    "tapi perlu perhatian jika bias masih tinggi."
+                )
+            elif si < 0.4:
+                st.caption(
+                    "📌 Pola biasmu cukup fluktuatif antar sesi — ini bisa berarti kamu sedang "
+                    "beradaptasi dan belajar dari umpan balik."
+                )
 
     if profile_data["last_updated_at"]:
         st.caption(f"Terakhir diperbarui: {profile_data['last_updated_at'].strftime('%d %b %Y %H:%M')}")
@@ -503,6 +565,8 @@ def _page_hasil() -> None:
 # ---------------------------------------------------------------------------
 def main() -> None:
     _init_session_state()
+    from modules.utils.ui_helpers import inject_custom_css
+    inject_custom_css()
     page = _sidebar()
 
     if page == "Informasi & Persetujuan":
