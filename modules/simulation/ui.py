@@ -18,8 +18,10 @@ from datetime import datetime
 
 import plotly.graph_objects as go
 import streamlit as st
+from plotly.subplots import make_subplots
 
 from config import INITIAL_CAPITAL, ROUNDS_PER_SESSION
+from modules.utils.ui_helpers import apply_chart_theme, CHART_TEXT, COLOR_GAIN, COLOR_LOSS
 from database.connection import get_session
 from database.models import StockCatalog
 from modules.analytics.bias_metrics import compute_and_save_metrics
@@ -47,16 +49,21 @@ def _build_full_chart(
     window_data: list[dict],
     current_round: int,
 ) -> go.Figure:
-    """Build a candlestick chart showing pre-window history + trading window.
+    """Build a candlestick + volume chart showing pre-window history + trading window.
 
     Args:
         stock_id:     Stock identifier (used for chart title).
-        pre_history:  Dicts with keys date/open/high/low/close/ma_5/ma_20.
+        pre_history:  Dicts with keys date/open/high/low/close/volume/ma_5/ma_20.
                       Shown dimmed before the trading window starts.
         window_data:  Full 14-day window dicts from sim_window[sid].
         current_round: How many rounds of the window to show (1-indexed).
     """
-    fig = go.Figure()
+    fig = make_subplots(
+        rows=2, cols=1,
+        shared_xaxes=True,
+        row_heights=[0.75, 0.25],
+        vertical_spacing=0.02,
+    )
 
     # --- Pre-window history (dimmed line) ---
     if pre_history:
@@ -70,7 +77,7 @@ def _build_full_chart(
             mode="lines", name="Riwayat",
             line=dict(color="rgba(150,150,150,0.5)", width=1),
             hovertemplate="%{x}<br>Harga: %{y:,.0f}<extra></extra>",
-        ))
+        ), row=1, col=1)
 
         # Pre-window MA overlays (dimmed)
         pre_ma5 = [d.get("ma_5") for d in pre_history]
@@ -81,14 +88,30 @@ def _build_full_chart(
                 mode="lines", name="MA5 (historis)",
                 line=dict(color="rgba(255,127,14,0.3)", width=1, dash="dash"),
                 hoverinfo="skip",
-            ))
+            ), row=1, col=1)
         if any(v is not None for v in pre_ma20):
             fig.add_trace(go.Scatter(
                 x=pre_dates, y=pre_ma20,
                 mode="lines", name="MA20 (historis)",
                 line=dict(color="rgba(44,160,44,0.3)", width=1, dash="dot"),
                 hoverinfo="skip",
-            ))
+            ), row=1, col=1)
+
+        # Pre-window volume bars (dimmed)
+        pre_vols = [d.get("volume") or 0 for d in pre_history]
+        pre_vol_colors = [
+            f"rgba({int(COLOR_GAIN[1:3],16)},{int(COLOR_GAIN[3:5],16)},{int(COLOR_GAIN[5:],16)},0.3)"
+            if d["close"] >= d["open"]
+            else f"rgba({int(COLOR_LOSS[1:3],16)},{int(COLOR_LOSS[3:5],16)},{int(COLOR_LOSS[5:],16)},0.3)"
+            for d in pre_history
+        ]
+        fig.add_trace(go.Bar(
+            x=pre_dates, y=pre_vols,
+            name="Volume (historis)",
+            marker_color=pre_vol_colors,
+            showlegend=False,
+            hoverinfo="skip",
+        ), row=2, col=1)
 
     # --- Trading window up to current_round (candlestick) ---
     visible = window_data[:current_round]
@@ -104,9 +127,9 @@ def _build_full_chart(
             low=[d["low"] for d in visible],
             close=[d["close"] for d in visible],
             name="Harga",
-            increasing_line_color="#26a69a",
-            decreasing_line_color="#ef5350",
-        ))
+            increasing_line_color=COLOR_GAIN,
+            decreasing_line_color=COLOR_LOSS,
+        ), row=1, col=1)
 
         # MA overlays for trading window
         ma5_vals = [d.get("ma_5") for d in visible]
@@ -117,14 +140,28 @@ def _build_full_chart(
                 mode="lines", name="MA5",
                 line=dict(color="#ff7f0e", width=1.5, dash="dash"),
                 hovertemplate="MA5: %{y:,.0f}<extra></extra>",
-            ))
+            ), row=1, col=1)
         if any(v is not None for v in ma20_vals):
             fig.add_trace(go.Scatter(
                 x=win_dates, y=ma20_vals,
                 mode="lines", name="MA20",
                 line=dict(color="#2ca02c", width=1.5, dash="dot"),
                 hovertemplate="MA20: %{y:,.0f}<extra></extra>",
-            ))
+            ), row=1, col=1)
+
+        # Volume bars for trading window
+        win_vols = [d.get("volume") or 0 for d in visible]
+        win_vol_colors = [
+            COLOR_GAIN if d["close"] >= d["open"] else COLOR_LOSS
+            for d in visible
+        ]
+        fig.add_trace(go.Bar(
+            x=win_dates, y=win_vols,
+            name="Volume",
+            marker_color=win_vol_colors,
+            showlegend=False,
+            hovertemplate="Vol: %{y:,.0f}<extra></extra>",
+        ), row=2, col=1)
 
         # Vertical marker at window start (add_vline with annotation_text
         # fails on date strings due to a Plotly internal mean() call, so
@@ -134,7 +171,7 @@ def _build_full_chart(
             x0=win_dates[0], x1=win_dates[0],
             y0=0, y1=1,
             yref="paper",
-            line=dict(dash="dash", color="rgba(0,0,255,0.5)"),
+            line=dict(dash="dash", color="rgba(74,144,226,0.6)"),
         )
         fig.add_annotation(
             x=win_dates[0],
@@ -142,19 +179,14 @@ def _build_full_chart(
             yref="paper",
             text="Mulai Trading",
             showarrow=False,
-            font=dict(size=10),
+            font=dict(size=10, color=CHART_TEXT),
             xanchor="left",
         )
 
-    fig.update_layout(
-        height=350,
-        margin=dict(l=10, r=10, t=30, b=10),
-        xaxis_rangeslider_visible=False,
-        legend=dict(orientation="h", y=-0.15, font=dict(size=10)),
-        xaxis_title=None,
-        yaxis_title="Harga (Rp)",
-        plot_bgcolor="white",
-    )
+    apply_chart_theme(fig, height=420)
+    fig.update_yaxes(title_text="Harga (Rp)", row=1, col=1, gridcolor="rgba(255,255,255,0.08)")
+    fig.update_yaxes(title_text="Volume", row=2, col=1, gridcolor="rgba(255,255,255,0.08)")
+    fig.update_xaxes(gridcolor="rgba(255,255,255,0.08)")
     return fig
 
 
@@ -476,8 +508,20 @@ def render_simulation_page() -> None:
     # Session complete state
     # -----------------------------------------------------------------------
     if st.session_state.get("sim_complete"):
-        st.success("Sesi Selesai! Menganalisis keputusan investasi kamu…")
-        if st.button("Lihat Hasil Analisis →", use_container_width=True, type="primary"):
+        st.markdown("## 🎯 Sesi Selesai!")
+        st.markdown("Semua 14 putaran telah diselesaikan. Sistem sedang menganalisis pola keputusanmu…")
+
+        final_prices = {sid: window[sid][-1]["close"] for sid in stock_ids}
+        final_value = portfolio.get_total_value(final_prices)
+        return_pct = ((final_value - INITIAL_CAPITAL) / INITIAL_CAPITAL) * 100
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Nilai Akhir", _format_rupiah(final_value))
+        c2.metric("Return", f"{return_pct:+.1f}%")
+        c3.metric("Total Transaksi", f"{len(portfolio.get_sold_trades())} trades")
+
+        st.divider()
+        if st.button("📊 Lihat Hasil Analisis →", use_container_width=True, type="primary"):
             st.session_state["last_session_id"] = session_id
             st.session_state["current_page"] = "Hasil Analisis & Umpan Balik"
             reset_simulation()
@@ -496,19 +540,29 @@ def render_simulation_page() -> None:
     current_prices = {sid: round_data[sid]["close"] for sid in stock_ids}
     total_value = portfolio.get_total_value(current_prices)
     delta = total_value - INITIAL_CAPITAL
+    delta_pct = (delta / INITIAL_CAPITAL) * 100
     realized_pnl = portfolio.get_realized_pnl()
+    unrealized_pnl = sum(
+        (current_prices.get(sid, pos.avg_purchase_price) - pos.avg_purchase_price) * pos.quantity
+        for sid, pos in portfolio.holdings.items()
+    )
 
-    c_val, c_cash, c_pnl = st.columns(3)
+    c_val, c_cash, c_rpnl, c_upnl = st.columns(4)
     c_val.metric(
         "Nilai Portofolio",
         _format_rupiah(total_value),
-        delta=_format_rupiah(delta),
+        delta=f"{delta_pct:+.1f}%",
         delta_color="normal",
     )
     c_cash.metric("Kas Tersedia", _format_rupiah(portfolio.cash))
-    c_pnl.metric(
+    c_rpnl.metric(
         "Realized P&L",
         _format_rupiah(realized_pnl),
+        delta_color="normal",
+    )
+    c_upnl.metric(
+        "Unrealized P&L",
+        _format_rupiah(unrealized_pnl),
         delta_color="normal",
     )
 
@@ -541,12 +595,19 @@ def render_simulation_page() -> None:
         st.markdown("**Pilih Saham**")
         meta_map = st.session_state.get("stock_metadata", {})
 
+        def _stock_label(sid: str) -> str:
+            ticker = sid.split(".")[0]
+            name = meta_map.get(sid, {}).get("name", "")
+            price = current_prices.get(sid, 0)
+            ret = round_data[sid].get("daily_return") or 0.0
+            ret_str = f"+{ret*100:.1f}%" if ret >= 0 else f"{ret*100:.1f}%"
+            held_badge = " 🔵" if sid in portfolio.holdings else ""
+            return f"{ticker}{held_badge} [{_format_rupiah(price)}] ({ret_str})"
+
         selected_stock = st.radio(
             "Saham",
             options=stock_ids,
-            format_func=lambda sid: (
-                f"{sid.split('.')[0]} — {meta_map.get(sid, {}).get('name', '')}"
-            ),
+            format_func=_stock_label,
             key="selected_stock",
             label_visibility="collapsed",
         )
@@ -610,6 +671,16 @@ def render_simulation_page() -> None:
 
         st.divider()
 
+        # Current position info
+        held = portfolio.holdings.get(sid)
+        if held:
+            pos_pnl = (snap["close"] - held.avg_purchase_price) * held.quantity
+            pos_pnl_sign = "+" if pos_pnl >= 0 else ""
+            st.caption(
+                f"📌 Posisi: **{held.quantity} lbr** @ {_format_rupiah(held.avg_purchase_price)} "
+                f"| P&L: {pos_pnl_sign}{_format_rupiah(pos_pnl)}"
+            )
+
         # Order panel inside a form (prevents rerun on every widget change)
         with st.form(f"order_{current_round}_{sid}", clear_on_submit=False):
             st.markdown(f"**Keputusan untuk {ticker}**")
@@ -643,7 +714,9 @@ def render_simulation_page() -> None:
                     key=f"qty_buy_form_{sid}_{current_round}",
                 )
                 if quantity > 0:
-                    st.caption(f"Estimasi biaya: {_format_rupiah(quantity * snap['close'])}")
+                    cost = quantity * snap["close"]
+                    st.caption(f"Estimasi biaya: {_format_rupiah(cost)}")
+                    st.caption(f"Setelah eksekusi: Kas = {_format_rupiah(portfolio.cash - cost)}")
             elif action_type == "Jual":
                 max_sell = held.quantity if held else 0
                 default_qty = existing_order.get("quantity", 0) if existing_order.get("action_type") == "Jual" else 0
@@ -658,7 +731,13 @@ def render_simulation_page() -> None:
                 if quantity > 0 and held:
                     pnl_est = (snap["close"] - held.avg_purchase_price) * quantity
                     pnl_sign = "+" if pnl_est >= 0 else ""
+                    proceeds = quantity * snap["close"]
+                    remaining_qty = held.quantity - quantity
                     st.caption(f"Estimasi P&L: {pnl_sign}{_format_rupiah(pnl_est)}")
+                    st.caption(
+                        f"Setelah eksekusi: Kas = {_format_rupiah(portfolio.cash + proceeds)}"
+                        + (f", Sisa = {remaining_qty} lbr" if remaining_qty > 0 else ", Posisi ditutup")
+                    )
 
             order_submitted = st.form_submit_button(
                 f"Konfirmasi {action_type} {ticker}",
