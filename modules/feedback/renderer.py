@@ -30,6 +30,21 @@ from modules.utils.ui_helpers import (
     build_severity_gauge,
 )
 
+# ---------------------------------------------------------------------------
+# Backward-compatible aliases (used by tests)
+# ---------------------------------------------------------------------------
+
+_SEVERITY_COLOUR = {
+    "severe": "🔴",
+    "moderate": "🟠",
+    "mild": "🟡",
+    "none": "🟢",
+}
+
+_SEVERITY_LABEL = SEVERITY_LABELS
+
+_BIAS_DISPLAY_NAME = BIAS_NAMES
+
 _SEVERITY_ORDER = ["none", "mild", "moderate", "severe"]
 
 
@@ -69,50 +84,52 @@ def render_bias_card(
     title = BIAS_NAMES.get(bias_type, bias_type.replace("_", " ").title())
     desc = BIAS_DESCRIPTIONS.get(bias_type, "")
 
+    # Styled card header with colored left border
     st.markdown(
         f"""
         <div style="
             border-left: 4px solid {color};
             background: {bg};
             border-radius: 8px;
-            padding: 20px 24px;
-            margin-bottom: 16px;
+            padding: 16px 20px;
+            margin-bottom: 4px;
         ">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                <span style="font-size: 18px; font-weight: 600; color: white;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <span style="font-size: 17px; font-weight: 600; color: white;">
                     {icon} {title}
                 </span>
                 <span style="
                     background: {color}22;
                     color: {color};
-                    padding: 4px 12px;
+                    padding: 3px 10px;
                     border-radius: 12px;
-                    font-size: 13px;
+                    font-size: 12px;
                     font-weight: 500;
                 ">{label}</span>
             </div>
-            <p style="color: #90A4AE; font-size: 13px; margin-bottom: 0;">{desc}</p>
+            <p style="color: #90A4AE; font-size: 12px; margin: 0;">{desc}</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    if prev_severity is not None:
-        delta_str = _severity_delta(prev_severity, severity)
-        st.caption(delta_str)
+    # Expander for detail content (expanded for non-none severity)
+    with st.expander(f"{icon} {title} — {label}", expanded=(severity != "none")):
+        if prev_severity is not None:
+            delta_str = _severity_delta(prev_severity, severity)
+            st.caption(delta_str)
 
-    if severity == "none":
-        st.success(explanation)
-    else:
-        tab_exp, tab_rec = st.tabs(["📖 Penjelasan", "💡 Rekomendasi"])
-        with tab_exp:
-            st.markdown(explanation)
-        with tab_rec:
-            st.markdown(recommendation)
+        if severity == "none":
+            st.success(explanation)
+        else:
+            st.markdown("**Penjelasan:**")
+            st.info(explanation)
+            st.markdown("**Rekomendasi:**")
+            st.warning(recommendation)
 
 
 def render_longitudinal_section(user_id: int) -> None:
-    """Show session-over-session severity history as a colour-coded visual timeline.
+    """Show session-over-session severity history as a compact table + visual timeline.
 
     Args:
         user_id: ID of the user.
@@ -127,6 +144,23 @@ def render_longitudinal_section(user_id: int) -> None:
     st.subheader("📈 Perjalanan Bias Antar Sesi")
     st.caption("Warna menunjukkan intensitas bias dari sesi ke sesi. Penurunan = perbaikan.")
 
+    # Table format (backward-compatible with tests)
+    rows = []
+    for i, _ in enumerate(summary["sessions"], start=1):
+        row = {"Sesi": f"Sesi {i}"}
+        for bias_type in ["disposition_effect", "overconfidence", "loss_aversion"]:
+            sev = (
+                summary["trend"][bias_type][i - 1]
+                if i - 1 < len(summary["trend"][bias_type])
+                else "none"
+            )
+            emoji = _SEVERITY_COLOUR.get(sev, "⚪")
+            row[BIAS_NAMES[bias_type]] = f"{emoji} {SEVERITY_LABELS.get(sev, sev)}"
+        rows.append(row)
+
+    st.table(rows)
+
+    # Visual color-coded timeline per bias (additional polish)
     n_sessions = len(summary["sessions"])
     for bias_type in ["disposition_effect", "overconfidence", "loss_aversion"]:
         title = BIAS_NAMES.get(bias_type, bias_type)
@@ -136,14 +170,14 @@ def render_longitudinal_section(user_id: int) -> None:
         for i, col in enumerate(cols):
             if i < len(trend):
                 sev = trend[i]
-                color = SEVERITY_COLORS.get(sev, "#78909c")
-                label = SEVERITY_LABELS.get(sev, sev)
+                clr = SEVERITY_COLORS.get(sev, "#78909c")
+                lbl = SEVERITY_LABELS.get(sev, sev)
                 col.markdown(
-                    f"<div style='text-align:center; padding:8px; "
-                    f"border-radius:8px; background:{color}22; "
-                    f"border: 1px solid {color}44;'>"
-                    f"<div style='font-size:11px; color:#90A4AE;'>Sesi {i + 1}</div>"
-                    f"<div style='font-size:13px; color:{color}; font-weight:600;'>{label}</div>"
+                    f"<div style='text-align:center; padding:6px; "
+                    f"border-radius:8px; background:{clr}22; "
+                    f"border: 1px solid {clr}44;'>"
+                    f"<div style='font-size:10px; color:#90A4AE;'>Sesi {i + 1}</div>"
+                    f"<div style='font-size:12px; color:{clr}; font-weight:600;'>{lbl}</div>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
