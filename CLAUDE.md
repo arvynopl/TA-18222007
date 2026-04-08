@@ -24,7 +24,7 @@ bash setup.sh                 # One-command first-time setup
 app.py                   Streamlit entry point — 5 pages, routing, session state
 config.py                ALL tunable parameters and thresholds (edit here, not in modules)
 database/
-  models.py              9 SQLAlchemy ORM entities + indexes
+  models.py              10 SQLAlchemy ORM entities + indexes (incl. UserSurvey)
   connection.py          get_session() context manager, init_db()
   seed.py                seed_stock_catalog(), seed_market_snapshots(), run_seed()
 modules/

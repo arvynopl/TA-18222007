@@ -15,7 +15,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from database.models import BiasMetric, CognitiveProfile, FeedbackHistory, UserAction
+from database.models import BiasMetric, CognitiveProfile, FeedbackHistory, UserAction, UserSurvey
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +92,11 @@ def export_user_history_csv(
         .order_by(BiasMetric.computed_at)
         .all()
     )
+    survey = (
+        db_session.query(UserSurvey)
+        .filter_by(user_id=user_id)
+        .first()
+    )
     rows = []
     for i, m in enumerate(metrics, start=1):
         rows.append({
@@ -103,6 +108,10 @@ def export_user_history_csv(
             "plr": m.disposition_plr,
             "lai": m.loss_aversion_index,
             "computed_at": m.computed_at.isoformat() if m.computed_at else None,
+            "survey_risk_tolerance": survey.q_risk_tolerance if survey else None,
+            "survey_loss_sensitivity": survey.q_loss_sensitivity if survey else None,
+            "survey_trading_frequency": survey.q_trading_frequency if survey else None,
+            "survey_holding_behavior": survey.q_holding_behavior if survey else None,
         })
     return rows
 
@@ -237,6 +246,31 @@ def export_session_data(
                 ),
             })
     written.append(profile_path)
+
+    # --- UserSurvey (user-level, not session-scoped) ---
+    survey = (
+        db_session.query(UserSurvey)
+        .filter_by(user_id=user_id)
+        .first()
+    )
+    survey_path = output_dir / f"survey_{user_id}.csv"
+    with open(survey_path, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(
+            fh,
+            fieldnames=["user_id", "q_risk_tolerance", "q_loss_sensitivity",
+                        "q_trading_frequency", "q_holding_behavior", "submitted_at"],
+        )
+        writer.writeheader()
+        if survey:
+            writer.writerow({
+                "user_id": user_id,
+                "q_risk_tolerance": survey.q_risk_tolerance,
+                "q_loss_sensitivity": survey.q_loss_sensitivity,
+                "q_trading_frequency": survey.q_trading_frequency,
+                "q_holding_behavior": survey.q_holding_behavior,
+                "submitted_at": survey.submitted_at.isoformat() if survey.submitted_at else "",
+            })
+    written.append(survey_path)
 
     logger.info(
         "Exported session data for user=%d session=%s to %s (%d files)",
