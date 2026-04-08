@@ -71,6 +71,7 @@ def _init_session_state() -> None:
         "experience_level": None,
         "last_session_id": None,
         "consent_given": False,
+        "show_survey": False,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -356,8 +357,99 @@ def _page_beranda() -> None:
             except Exception:
                 logger.warning("Failed to persist consent log for user %d", uid)
 
-        st.session_state["current_page"] = "Simulasi Investasi"
-        st.rerun()
+        # Check if user already completed survey
+        from database.models import UserSurvey
+        try:
+            with get_session() as check_sess:
+                has_survey = check_sess.query(UserSurvey).filter_by(user_id=uid).first() is not None
+        except Exception:
+            has_survey = True  # fail-safe: skip survey on error
+
+        if not has_survey:
+            st.session_state["show_survey"] = True
+            st.rerun()
+        else:
+            st.session_state["current_page"] = "Simulasi Investasi"
+            st.rerun()
+
+    # --- Optional Risk Preference Survey ---
+    if st.session_state.get("show_survey") and st.session_state.get("user_id"):
+        st.divider()
+        with st.expander("📋 Isi Survei Preferensi Risiko (Opsional)", expanded=True):
+            st.caption(
+                "Survei ini membantu peneliti membandingkan preferensi yang Anda "
+                "nyatakan dengan perilaku aktual di simulasi. Data tidak memengaruhi "
+                "simulasi atau skor Anda. Anda dapat melewati survei ini."
+            )
+
+            LIKERT_LABELS = {
+                1: "1 — Sangat Tidak Setuju",
+                2: "2 — Tidak Setuju",
+                3: "3 — Netral",
+                4: "4 — Setuju",
+                5: "5 — Sangat Setuju",
+            }
+
+            with st.form("survey_form"):
+                q1 = st.select_slider(
+                    "Saya bersedia mengambil risiko tinggi demi potensi keuntungan besar.",
+                    options=[1, 2, 3, 4, 5],
+                    value=3,
+                    format_func=lambda x: LIKERT_LABELS[x],
+                )
+                q2 = st.select_slider(
+                    "Saya merasa sangat terganggu ketika investasi saya mengalami kerugian sementara.",
+                    options=[1, 2, 3, 4, 5],
+                    value=3,
+                    format_func=lambda x: LIKERT_LABELS[x],
+                )
+                q3 = st.select_slider(
+                    "Saya merasa perlu sering melakukan transaksi untuk mendapatkan hasil optimal.",
+                    options=[1, 2, 3, 4, 5],
+                    value=3,
+                    format_func=lambda x: LIKERT_LABELS[x],
+                )
+                q4 = st.select_slider(
+                    "Ketika harga saham turun, saya cenderung menahan saham tersebut daripada menjualnya.",
+                    options=[1, 2, 3, 4, 5],
+                    value=3,
+                    format_func=lambda x: LIKERT_LABELS[x],
+                )
+
+                col_submit, col_skip = st.columns(2)
+                with col_submit:
+                    survey_submitted = st.form_submit_button(
+                        "Simpan Survei", use_container_width=True, type="primary"
+                    )
+                with col_skip:
+                    survey_skipped = st.form_submit_button(
+                        "Lewati →", use_container_width=True
+                    )
+
+            if survey_submitted:
+                uid = st.session_state["user_id"]
+                try:
+                    from database.models import UserSurvey
+                    with get_session() as survey_sess:
+                        survey_sess.add(UserSurvey(
+                            user_id=uid,
+                            q_risk_tolerance=q1,
+                            q_loss_sensitivity=q2,
+                            q_trading_frequency=q3,
+                            q_holding_behavior=q4,
+                        ))
+                    st.success("Survei berhasil disimpan. Terima kasih!")
+                except Exception:
+                    logger.warning("Failed to save survey for user %d", uid)
+
+                st.session_state["show_survey"] = False
+                st.session_state["current_page"] = "Simulasi Investasi"
+                st.rerun()
+
+            if survey_skipped:
+                st.session_state["show_survey"] = False
+                st.session_state["current_page"] = "Simulasi Investasi"
+                st.rerun()
 
 
 # ---------------------------------------------------------------------------

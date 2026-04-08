@@ -101,12 +101,12 @@ def test_export_user_history_csv_session_num_increments(db, user):
 
 
 def test_export_session_data_writes_csv_files(db, user, tmp_path):
-    """export_session_data writes 4 CSV files to the output directory."""
+    """export_session_data writes 5 CSV files to the output directory."""
     sid = str(uuid.uuid4())
     _run_pipeline(db, user.id, sid)
 
     written = export_session_data(db, user.id, sid, tmp_path)
-    assert len(written) == 4
+    assert len(written) == 5
     for path in written:
         assert Path(path).exists()
         assert Path(path).stat().st_size > 0
