@@ -227,14 +227,24 @@ def render_feedback_page(user_id: int, session_id: str) -> None:
         sev = classify_severity(metric_data["ocs"], OCS_SEVERE, OCS_MODERATE, OCS_MILD)
         fig = build_severity_gauge(metric_data["ocs"], 1.0, "Overconfidence", sev)
         st.plotly_chart(fig, use_container_width=True)
+        st.caption(
+            f"Ambang batas — Ringan: >{OCS_MILD} | Sedang: >{OCS_MODERATE} | Berat: >{OCS_SEVERE}"
+        )
     with g2:
         sev = classify_severity(metric_data["dei"], DEI_SEVERE, DEI_MODERATE, DEI_MILD)
         fig = build_severity_gauge(metric_data["dei"], 1.0, "Efek Disposisi", sev)
         st.plotly_chart(fig, use_container_width=True)
+        st.caption(
+            f"Ambang batas — Ringan: >{DEI_MILD} | Sedang: >{DEI_MODERATE} | Berat: >{DEI_SEVERE}"
+        )
     with g3:
         sev = classify_severity(metric_data["lai"], LAI_SEVERE, LAI_MODERATE, LAI_MILD)
         fig = build_severity_gauge(metric_data["lai"], 3.0, "Loss Aversion", sev)
         st.plotly_chart(fig, use_container_width=True)
+        st.caption(
+            f"Ambang batas — Ringan: >{LAI_MILD}× | Sedang: >{LAI_MODERATE}× | Berat: >{LAI_SEVERE}×  "
+            f"(rasio durasi tahan rugi vs. untung)"
+        )
 
     # Build previous-session severity lookup
     prev_severities: dict[str, str | None] = {}

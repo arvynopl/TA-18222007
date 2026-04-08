@@ -280,7 +280,9 @@ def _page_beranda() -> None:
                - *Overconfidence* — Terlalu sering trading dengan hasil kurang optimal
                - *Loss Aversion* — Menahan saham rugi terlalu lama
             3. **Profil Kognitif** — Profilmu diperbarui setelah setiap sesi menggunakan
-               model *Cognitive Digital Twin* (CDT) berbasis EMA.
+               model *Cognitive Digital Twin* (CDT) berbasis EMA. Sistem juga mendeteksi
+               **Preferensi Risiko** kamu (Konservatif / Moderat / Agresif) berdasarkan
+               volatilitas saham yang kamu pilih — tanpa kamu harus mengisi kuesioner.
             4. **Umpan Balik** — Kamu menerima penjelasan personal dan rekomendasi perbaikan.
             """
         )
@@ -298,6 +300,11 @@ def _page_beranda() -> None:
             "Tingkat Pengalaman Investasi",
             options=["beginner", "intermediate", "advanced"],
             format_func=lambda x: {"beginner": "Pemula", "intermediate": "Menengah", "advanced": "Berpengalaman"}[x],
+        )
+        st.caption(
+            "**Pemula:** Belum pernah atau jarang berinvestasi saham. "
+            "**Menengah:** Sudah aktif berinvestasi 1–3 tahun. "
+            "**Berpengalaman:** Investor aktif >3 tahun atau memiliki latar belakang keuangan formal."
         )
         submitted = st.form_submit_button("Masuk →", use_container_width=True, type="primary")
 
@@ -413,13 +420,26 @@ def _page_profil() -> None:
         else "Konservatif"
     )
     si = profile_data["stability_index"]
-    c1.metric("Total Sesi", profile_data["session_count"])
+    c1.metric(
+        "Total Sesi",
+        profile_data["session_count"],
+        delta=" ",
+        delta_color="off",
+    )
     c2.metric(
         "Stabilitas",
         f"{si:.0%}",
+        delta=" ",
+        delta_color="off",
         help="Seberapa konsisten pola biasmu antar sesi (100% = sangat konsisten)",
     )
-    c3.metric("Preferensi Risiko", rp_label, delta=f"Skor: {rp:.2f}", delta_color="off")
+    c3.metric(
+        "Preferensi Risiko",
+        rp_label,
+        delta=f"Skor: {rp:.2f}",
+        delta_color="off",
+        help="Dihitung dari volatilitas saham yang kamu pilih, diperbarui tiap sesi dengan EMA.",
+    )
 
     with st.expander("Apa itu Preferensi Risiko?"):
         st.markdown(
@@ -512,6 +532,17 @@ def _page_profil() -> None:
 
     if profile_data["last_updated_at"]:
         st.caption(f"Terakhir diperbarui: {profile_data['last_updated_at'].strftime('%d %b %Y %H:%M')}")
+
+    st.divider()
+    col_cta1, col_cta2 = st.columns(2)
+    with col_cta1:
+        if st.button("📋 Lihat Umpan Balik Terakhir →", use_container_width=True):
+            st.session_state["current_page"] = "Hasil Analisis & Umpan Balik"
+            st.rerun()
+    with col_cta2:
+        if st.button("🚀 Mulai Sesi Baru →", use_container_width=True, type="primary"):
+            st.session_state["current_page"] = "Simulasi Investasi"
+            st.rerun()
 
     # --- Data Export Section ---
     st.divider()
