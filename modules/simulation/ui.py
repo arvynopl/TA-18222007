@@ -114,7 +114,9 @@ def _build_full_chart(
         ), row=2, col=1)
 
     # --- Trading window up to current_round (candlestick) ---
-    visible = window_data[:current_round]
+    # Show at least 2 bars on round 1 to avoid single-bar Plotly rendering artifact.
+    display_count = max(current_round, 2) if len(window_data) >= 2 else current_round
+    visible = window_data[:display_count]
     if visible:
         win_dates = [
             d["date"].isoformat() if hasattr(d["date"], "isoformat") else str(d["date"])
@@ -165,23 +167,26 @@ def _build_full_chart(
 
         # Vertical marker at window start (add_vline with annotation_text
         # fails on date strings due to a Plotly internal mean() call, so
-        # use add_shape + add_annotation separately)
-        fig.add_shape(
-            type="line",
-            x0=win_dates[0], x1=win_dates[0],
-            y0=0, y1=1,
-            yref="paper",
-            line=dict(dash="dash", color="rgba(74,144,226,0.6)"),
-        )
-        fig.add_annotation(
-            x=win_dates[0],
-            y=1,
-            yref="paper",
-            text="Mulai Trading",
-            showarrow=False,
-            font=dict(size=10, color=CHART_TEXT),
-            xanchor="left",
-        )
+        # use add_shape + add_annotation separately).
+        # Suppress on round 1: only 1 real bar exists so the boundary marker
+        # is meaningless and visually confusing.
+        if current_round > 1:
+            fig.add_shape(
+                type="line",
+                x0=win_dates[0], x1=win_dates[0],
+                y0=0, y1=1,
+                yref="paper",
+                line=dict(dash="dash", color="rgba(74,144,226,0.6)"),
+            )
+            fig.add_annotation(
+                x=win_dates[0],
+                y=1,
+                yref="paper",
+                text="Mulai Trading",
+                showarrow=False,
+                font=dict(size=10, color=CHART_TEXT),
+                xanchor="left",
+            )
 
     apply_chart_theme(fig, height=420)
     fig.update_yaxes(title_text="Harga (Rp)", row=1, col=1, gridcolor="rgba(255,255,255,0.08)")
@@ -554,15 +559,22 @@ def render_simulation_page() -> None:
         delta=f"{delta_pct:+.1f}%",
         delta_color="normal",
     )
-    c_cash.metric("Kas Tersedia", _format_rupiah(portfolio.cash))
+    c_cash.metric(
+        "Kas Tersedia",
+        _format_rupiah(portfolio.cash),
+        delta=f"{portfolio.cash - INITIAL_CAPITAL:+,.0f}" if portfolio.cash != INITIAL_CAPITAL else " ",
+        delta_color="off",
+    )
     c_rpnl.metric(
         "Realized P&L",
         _format_rupiah(realized_pnl),
+        delta=f"{realized_pnl:+,.0f}" if realized_pnl != 0 else " ",
         delta_color="normal",
     )
     c_upnl.metric(
         "Unrealized P&L",
         _format_rupiah(unrealized_pnl),
+        delta=f"{unrealized_pnl:+,.0f}" if unrealized_pnl != 0 else " ",
         delta_color="normal",
     )
 
@@ -573,7 +585,8 @@ def render_simulation_page() -> None:
 - Setiap putaran mewakili **1 hari trading** menggunakan data historis saham IDX
 - Pilih saham dari daftar di sebelah kiri, lalu lihat grafik harga dan indikator teknikal
 - Tentukan keputusan: **Beli**, **Jual**, atau **Tahan** (default: Tahan)
-- Klik **Konfirmasi** untuk menyimpan keputusan, lalu klik **Eksekusi Semua** untuk mengonfirmasi semua keputusan dan lanjut ke putaran berikutnya
+- Klik **Tambahkan ke Antrean** untuk mencatat keputusan satu saham — ini belum mengeksekusi transaksi
+- Setelah selesai memilih semua saham, klik **Eksekusi Semua** di bagian bawah untuk mengeksekusi semua antrean dan lanjut ke putaran berikutnya
 
 **Membaca grafik:**
 - **Candlestick hijau** = harga naik, **merah** = harga turun
@@ -650,11 +663,7 @@ def render_simulation_page() -> None:
             f"*({meta.get('sector', '')})*"
         )
 
-        # Candlestick chart
-        fig = _build_full_chart(sid, pre_hist, win_data, current_round)
-        st.plotly_chart(fig, use_container_width=True, key=f"chart_{sid}_{current_round}")
-
-        # Technical indicators row
+        # Technical indicators row (above chart so users read them before the chart shapes perception)
         ma5 = snap.get("ma_5")
         ma20 = snap.get("ma_20")
         trend = snap.get("trend") or "—"
@@ -663,13 +672,49 @@ def render_simulation_page() -> None:
         ret_str = f"{daily_ret * 100:+.2f}%" if daily_ret is not None else "—"
 
         ind_cols = st.columns(4)
-        ind_cols[0].metric("Harga", _format_rupiah(snap["close"]), delta=ret_str)
-        ind_cols[1].caption(f"MA5: {_format_rupiah(ma5) if ma5 else '—'}")
-        ind_cols[2].caption(f"MA20: {_format_rupiah(ma20) if ma20 else '—'}")
+        ind_cols[0].metric(
+            "Harga Penutupan",
+            _format_rupiah(snap["close"]),
+            delta=ret_str,
+            help="Harga penutupan hari ini. Delta menunjukkan perubahan dari hari sebelumnya.",
+        )
+        ind_cols[1].metric(
+            "MA5",
+            _format_rupiah(ma5) if ma5 else "—",
+            help=(
+                "Moving Average 5 Hari: rata-rata harga penutupan 5 hari terakhir. "
+                "Jika harga saat ini di ATAS MA5, momentum jangka pendek cenderung positif. "
+                "Jika di BAWAH MA5, momentum melemah."
+            ),
+        )
+        ind_cols[2].metric(
+            "MA20",
+            _format_rupiah(ma20) if ma20 else "—",
+            help=(
+                "Moving Average 20 Hari: tren jangka menengah. "
+                "Persilangan MA5 memotong ke atas MA20 (golden cross) sering dilihat sebagai sinyal beli. "
+                "MA5 memotong ke bawah MA20 (death cross) sering dilihat sebagai sinyal jual."
+            ),
+        )
         rsi_str = f"{rsi:.0f}" if rsi is not None else "—"
-        ind_cols[3].caption(f"Tren: {trend.capitalize()} | RSI: {rsi_str}")
+        ind_cols[3].metric(
+            "RSI-14",
+            rsi_str,
+            delta=trend.capitalize() if trend and trend != "—" else None,
+            delta_color="off",
+            help=(
+                "Relative Strength Index (14 hari): mengukur kecepatan dan besar perubahan harga. "
+                "RSI > 70: kondisi overbought — harga mungkin terlalu tinggi dan bisa koreksi. "
+                "RSI < 30: kondisi oversold — harga mungkin terlalu rendah dan bisa rebound. "
+                "RSI 30–70: zona netral."
+            ),
+        )
 
         st.divider()
+
+        # Candlestick chart
+        fig = _build_full_chart(sid, pre_hist, win_data, current_round)
+        st.plotly_chart(fig, use_container_width=True, key=f"chart_{sid}_{current_round}")
 
         # Current position info
         held = portfolio.holdings.get(sid)
@@ -740,7 +785,7 @@ def render_simulation_page() -> None:
                     )
 
             order_submitted = st.form_submit_button(
-                f"Konfirmasi {action_type} {ticker}",
+                f"➕ Tambahkan ke Antrean: {action_type} {ticker}",
                 use_container_width=True,
             )
 
