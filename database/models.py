@@ -1,9 +1,10 @@
 """
 database/models.py — SQLAlchemy ORM entity definitions.
 
-Seven entities:
+Ten SQLAlchemy ORM entities + indexes (incl. UserSurvey):
     User, StockCatalog, MarketSnapshot, UserAction,
-    BiasMetric, CognitiveProfile, FeedbackHistory
+    BiasMetric, CognitiveProfile, FeedbackHistory,
+    ConsentLog, UserSurvey, SessionSummary
 """
 
 from datetime import datetime, timezone, date as date_type
@@ -41,6 +42,9 @@ class User(Base):
     )
     feedback_history = relationship(
         "FeedbackHistory", back_populates="user", lazy="dynamic", cascade="all, delete-orphan"
+    )
+    survey = relationship(
+        "UserSurvey", back_populates="user", uselist=False, cascade="all, delete-orphan"
     )
 
     def __repr__(self) -> str:
@@ -251,6 +255,36 @@ class ConsentLog(Base):
 
     def __repr__(self) -> str:
         return f"<ConsentLog user={self.user_id} given={self.consent_given}>"
+
+
+class UserSurvey(Base):
+    """Optional self-reported risk preference survey (pre-simulation)."""
+
+    __tablename__ = "user_surveys"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    user_id: int = Column(
+        Integer, ForeignKey("users.id"), unique=True, nullable=False
+    )
+
+    # Likert scale 1-5 for each question
+    q_risk_tolerance: int = Column(Integer, nullable=False)      # 1=sangat menghindari risiko, 5=sangat menyukai risiko
+    q_loss_sensitivity: int = Column(Integer, nullable=False)     # 1=tidak terganggu, 5=sangat terganggu
+    q_trading_frequency: int = Column(Integer, nullable=False)    # 1=sangat jarang, 5=sangat sering
+    q_holding_behavior: int = Column(Integer, nullable=False)     # 1=langsung jual, 5=selalu menahan
+
+    submitted_at: datetime = Column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    # Relationships
+    user = relationship("User", back_populates="survey")
+
+    def __repr__(self) -> str:
+        return (
+            f"<UserSurvey user={self.user_id} "
+            f"risk={self.q_risk_tolerance} loss={self.q_loss_sensitivity}>"
+        )
 
 
 class SessionSummary(Base):
