@@ -30,6 +30,7 @@ PRE_WINDOW_DAYS: int = 30               # Days of history shown before the tradi
 # ---------------------------------------------------------------------------
 ALPHA: float = 0.3   # Recency weight for bias intensity vector
 BETA: float = 0.2    # Recency weight for risk preference
+SURVEY_PRIOR_WEIGHT: float = 0.15  # Damping factor for survey-informed CDT priors
 CDT_STABILITY_WINDOW: int = 5  # Number of past sessions used for stability index
 
 # ---------------------------------------------------------------------------
@@ -81,6 +82,8 @@ def validate_config() -> None:
         raise ValueError(f"ALPHA must be in (0, 1), got {ALPHA}")
     if not (0 < BETA < 1):
         raise ValueError(f"BETA must be in (0, 1), got {BETA}")
+    if not (0.0 < SURVEY_PRIOR_WEIGHT <= 0.5):
+        raise ValueError("SURVEY_PRIOR_WEIGHT must be in (0, 0.5]")
 
     # Severity thresholds must be strictly ordered: mild < moderate < severe
     for label, mild, moderate, severe in [
