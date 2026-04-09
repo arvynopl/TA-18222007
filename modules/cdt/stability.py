@@ -23,9 +23,12 @@ def compute_stability_index(db_session: Session, user_id: int) -> float:
 
     Algorithm:
         1. Fetch the last N BiasMetric rows for the user (ordered by computed_at).
-        2. For each bias dimension (overconfidence, DEI, LAI), normalise the
-           metric to [0, 1] and compute the standard deviation across sessions.
-        3. stability = 1 − mean(std_overconfidence, std_dei_norm, std_lai_norm)
+        2. Normalise each metric to [0, 1]:
+           - OCS already in [0, 1) — unchanged.
+           - DEI: mapped from [−1, 1] to [0, 1] as (DEI + 1) / 2.
+           - LAI: normalised as min(LAI / 3, 1.0).
+        3. Compute the standard deviation across sessions for each dimension.
+        4. stability = 1 − mean(std_overconfidence, std_dei_norm, std_lai_norm)
            clamped to [0, 1].
 
     Fewer than 2 sessions → returns 0.0 (insufficient data).
@@ -49,9 +52,11 @@ def compute_stability_index(db_session: Session, user_id: int) -> float:
         return 0.0
 
     ocs_vals = [m.overconfidence_score or 0.0 for m in metrics]
-    # Use raw (signed) DEI so oscillation between positive and negative values
-    # registers as high variance (erratic behaviour).
-    dei_vals = [(m.disposition_dei or 0.0) for m in metrics]
+    # Map DEI from [−1, 1] to [0, 1] so all three dimensions are scale-comparable.
+    # Raw DEI oscillating ±0.8 has std≈0.8; OCS/LAI_norm have max std≈0.5.
+    # Without normalization, DEI dominates the mean_std and stability becomes
+    # a proxy for DEI variance rather than overall behavioural consistency.
+    dei_vals = [((m.disposition_dei or 0.0) + 1.0) / 2.0 for m in metrics]
     lai_vals = [min((m.loss_aversion_index or 0.0) / 3.0, 1.0) for m in metrics]
 
     def _std(vals: list[float]) -> float:
