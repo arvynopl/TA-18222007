@@ -47,6 +47,7 @@ class SessionFeatures:
     realized_trades: list = field(default_factory=list)
     open_positions: list = field(default_factory=list)
     response_times: list = field(default_factory=list)
+    realized_trade_count: int = 0       # Number of completed buy→sell round-trips this session
     # Derived timing and return metrics (populated at end of extract_session_features)
     avg_response_time_ms: float = 0.0
     max_response_time_ms: int = 0
@@ -181,6 +182,7 @@ def extract_session_features(
     )
     features.final_value = cash + market_value
     features.realized_trades = realized_trades
+    features.realized_trade_count = len(realized_trades)
     features.open_positions = open_positions
     features.response_times = response_times
 

@@ -213,6 +213,7 @@ def classify_severity(
     severe_threshold: float,
     moderate_threshold: float,
     mild_t: float | None = None,
+    min_sample_met: bool = True,
 ) -> str:
     """Map a metric value to a severity label.
 
@@ -221,10 +222,20 @@ def classify_severity(
         severe_threshold:   Value at or above which severity = "severe".
         moderate_threshold: Value at or above which severity = "moderate".
         mild_t:             Optional value at or above which severity = "mild".
+        min_sample_met:     If False, severity is capped at "mild" regardless of value.
+                            Use when the realized trade count is below the
+                            MIN_TRADES_FOR_FULL_SEVERITY threshold (insufficient sample
+                            for DEI and LAI to be meaningfully classified as
+                            moderate/severe). Default True preserves existing behaviour.
 
     Returns:
         "severe", "moderate", "mild", or "none".
     """
+    if not min_sample_met:
+        # Insufficient realized trades → cap at "mild"
+        if mild_t is not None and value >= mild_t:
+            return "mild"
+        return "none"
     if value >= severe_threshold:
         return "severe"
     if value >= moderate_threshold:
