@@ -21,8 +21,10 @@ from sqlalchemy.orm import Session
 import logging
 
 from config import (
+    CDT_MODIFIER_STABILITY_THRESHOLD,
     DEI_MILD, DEI_MODERATE, DEI_SEVERE,
     LAI_MILD, LAI_MODERATE, LAI_SEVERE,
+    MIN_TRADES_FOR_FULL_SEVERITY,
     OCS_MILD, OCS_MODERATE, OCS_SEVERE,
     ROUNDS_PER_SESSION,
 )
@@ -37,8 +39,9 @@ def compute_counterfactual(
     db_session: Session,
     realized_trades: list[dict],
     open_positions: list[dict],
-    session_snapshots: dict,
+    session_snapshots: dict | None = None,
     extra_rounds: int = 3,
+    session_id: str | None = None,
 ) -> str:
     """Estimate what the user would have earned by holding the best winner longer.
 
@@ -49,8 +52,11 @@ def compute_counterfactual(
         db_session:        Active SQLAlchemy session.
         realized_trades:   From SessionFeatures.realized_trades.
         open_positions:    From SessionFeatures.open_positions.
-        session_snapshots: Dict mapping snapshot_id → close price (not used directly).
+        session_snapshots: Deprecated, unused. Pass None.
         extra_rounds:      How many additional rounds to project forward.
+        session_id:        Optional session UUID. When provided, actual MarketSnapshot
+                           data is used for projection instead of linear extrapolation
+                           (preferred).
 
     Returns:
         A Bahasa Indonesia counterfactual string, or empty string if not applicable.
@@ -72,12 +78,32 @@ def compute_counterfactual(
         return ""
     target_round = best["sell_round"] + actual_extra
 
-    # We don't have a direct round→snapshot mapping here; use a heuristic estimate
-    # Assume linear extrapolation from buy→sell trend (conservative)
-    trend_per_round = (best["sell_price"] - best["buy_price"]) / max(
-        best["sell_round"] - best["buy_round"], 1
-    )
-    projected_price = best["sell_price"] + trend_per_round * actual_extra
+    # Prefer actual market data over linear extrapolation.
+    # If session_id is provided, look up the real MarketSnapshot price for
+    # the target round by querying the UserAction record for that round.
+    projected_price: float | None = None
+    if session_id is not None:
+        target_action = (
+            db_session.query(UserAction)
+            .filter_by(
+                session_id=session_id,
+                stock_id=best["stock_id"],
+                scenario_round=target_round,
+            )
+            .first()
+        )
+        if target_action:
+            snap = db_session.get(MarketSnapshot, target_action.snapshot_id)
+            if snap and snap.close is not None:
+                projected_price = snap.close
+
+    if projected_price is None:
+        # Fallback: linear extrapolation with a price floor to prevent negatives.
+        trend_per_round = (best["sell_price"] - best["buy_price"]) / max(
+            best["sell_round"] - best["buy_round"], 1
+        )
+        projected_price = max(best["sell_price"] + trend_per_round * actual_extra, 0.01)
+
     projected_gain = (projected_price - best["buy_price"]) * best["quantity"]
 
     if projected_gain <= actual_gain:
@@ -91,6 +117,73 @@ def compute_counterfactual(
         f"estimasi keuntungan bisa mencapai Rp {projected_gain:,.0f} "
         f"(tambahan ≈ Rp {additional:,.0f})."
     )
+
+
+_SEVERITY_RANK: dict[str, int] = {"none": 0, "mild": 1, "moderate": 2, "severe": 3}
+
+
+def _get_cdt_modifier(
+    db_session: Session,
+    user_id: int,
+    session_id: str,
+    bias_type: str,
+    current_severity: str,
+    profile: CognitiveProfile,
+) -> str:
+    """Generate a CDT-aware contextual sentence appended to feedback explanation.
+
+    Returns an empty string when:
+      - Fewer than 3 sessions have been completed (insufficient longitudinal data)
+      - No notable trend or stability pattern is detected
+
+    Args:
+        db_session:       Active SQLAlchemy session.
+        user_id:          ID of the user.
+        session_id:       Current session UUID (excluded from previous-feedback lookup).
+        bias_type:        One of "overconfidence", "disposition_effect", "loss_aversion".
+        current_severity: Severity label for this session.
+        profile:          Current CognitiveProfile.
+
+    Returns:
+        A Bahasa Indonesia modifier string, or "".
+    """
+    if profile.session_count < 3:
+        return ""
+
+    curr_rank = _SEVERITY_RANK.get(current_severity, 0)
+    modifiers: list[str] = []
+
+    # Trend vs. previous session
+    prev_feedback = (
+        db_session.query(FeedbackHistory)
+        .filter_by(user_id=user_id, bias_type=bias_type)
+        .filter(FeedbackHistory.session_id != session_id)
+        .order_by(FeedbackHistory.delivered_at.desc())
+        .first()
+    )
+
+    if prev_feedback:
+        prev_rank = _SEVERITY_RANK.get(prev_feedback.severity, 0)
+        if curr_rank < prev_rank and current_severity != "none":
+            modifiers.append(
+                "Perkembangan positif: kecenderungan bias ini menurun dibanding sesi sebelumnya."
+            )
+        elif curr_rank > prev_rank:
+            modifiers.append(
+                "Perhatian: intensitas bias ini meningkat dari sesi sebelumnya."
+            )
+
+    # Persistent-pattern warning for stable but elevated bias
+    if (
+        profile.stability_index > CDT_MODIFIER_STABILITY_THRESHOLD
+        and current_severity in ("moderate", "severe")
+    ):
+        modifiers.append(
+            "Pola ini terdeteksi konsisten di beberapa sesi terakhir — "
+            "pertimbangkan untuk mengubah strategi tradingmu secara lebih mendasar."
+        )
+
+    return " ".join(modifiers)
 
 
 def generate_feedback(
@@ -149,7 +242,10 @@ def generate_feedback(
 
     # Counterfactual text — only computed for severe cases to avoid wasted work
     counterfactual_disp = (
-        compute_counterfactual(db_session, realized_trades, open_positions, {})
+        compute_counterfactual(
+            db_session, realized_trades, open_positions,
+            session_id=session_id,
+        )
         if dei_severity_pre == "severe"
         else ""
     )
@@ -178,6 +274,7 @@ def generate_feedback(
             "severe_t": DEI_SEVERE,
             "moderate_t": DEI_MODERATE,
             "mild_t": DEI_MILD,
+            "min_sample_met": len(realized_trades) >= MIN_TRADES_FOR_FULL_SEVERITY,
             "slots": {
                 "dei": dei_val,
                 "pgr": pgr_val,
@@ -205,6 +302,7 @@ def generate_feedback(
             "severe_t": LAI_SEVERE,
             "moderate_t": LAI_MODERATE,
             "mild_t": LAI_MILD,
+            "min_sample_met": len(realized_trades) >= MIN_TRADES_FOR_FULL_SEVERITY,
             "slots": {
                 "lai": lai_val,
                 "counterfactual_text": counterfactual_la,
@@ -214,7 +312,13 @@ def generate_feedback(
 
     records: list[FeedbackHistory] = []
     for cfg in bias_configs:
-        severity = classify_severity(cfg["value"], cfg["severe_t"], cfg["moderate_t"], cfg.get("mild_t"))
+        severity = classify_severity(
+            cfg["value"],
+            cfg["severe_t"],
+            cfg["moderate_t"],
+            cfg.get("mild_t"),
+            min_sample_met=cfg.get("min_sample_met", True),
+        )
         logger.debug("bias=%s value=%.3f severity=%s", cfg["bias_type"], cfg["value"], severity)
 
         if not has_trades:
@@ -242,6 +346,14 @@ def generate_feedback(
             safe_slots = defaultdict(str, cfg["slots"])
             explanation = tmpl["explanation"].format_map(safe_slots)
             recommendation = tmpl["recommendation"].format_map(safe_slots)
+
+        # Append CDT-aware longitudinal modifier when applicable
+        if has_trades and severity != "none":
+            cdt_mod = _get_cdt_modifier(
+                db_session, user_id, session_id, cfg["bias_type"], severity, profile
+            )
+            if cdt_mod:
+                explanation = explanation + " " + cdt_mod
 
         record = FeedbackHistory(
             user_id=user_id,

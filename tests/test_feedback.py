@@ -94,6 +94,10 @@ def test_severe_dei_selects_correct_template(db, user):
         realized_trades=[
             {"stock_id": "BBCA.JK", "buy_round": 1, "sell_round": 5,
              "buy_price": 8000, "sell_price": 9000, "quantity": 100},
+            {"stock_id": "BBRI.JK", "buy_round": 1, "sell_round": 5,
+             "buy_price": 7000, "sell_price": 8500, "quantity": 50},
+            {"stock_id": "BMRI.JK", "buy_round": 1, "sell_round": 5,
+             "buy_price": 6000, "sell_price": 7200, "quantity": 80},
         ],
         open_positions=[
             {"stock_id": "GOTO.JK", "quantity": 100, "avg_price": 80,
@@ -173,11 +177,23 @@ def test_get_session_feedback_retrieves_records(db, user):
 
 
 def test_loss_aversion_severe_threshold(db, user):
-    """LAI = 2.5 → severity = 'severe'."""
+    """LAI = 2.5 → severity = 'severe' (with sufficient realized trades for full severity)."""
     metric = _make_metric(db, user.id, lai=2.5)
     profile = get_or_create_profile(db, user.id)
 
-    feedbacks = generate_feedback(db, user.id, metric.session_id, metric, profile)
+    # 3 realized trades needed for min_sample_met=True so severity is not capped at "mild"
+    realized = [
+        {"stock_id": "BBCA.JK", "buy_round": 1, "sell_round": 8,
+         "buy_price": 10000, "sell_price": 8000, "quantity": 10},
+        {"stock_id": "BBRI.JK", "buy_round": 1, "sell_round": 10,
+         "buy_price": 9000, "sell_price": 7500, "quantity": 10},
+        {"stock_id": "BMRI.JK", "buy_round": 1, "sell_round": 12,
+         "buy_price": 8000, "sell_price": 6500, "quantity": 10},
+    ]
+    feedbacks = generate_feedback(
+        db, user.id, metric.session_id, metric, profile,
+        realized_trades=realized,
+    )
     la_fb = next(f for f in feedbacks if f.bias_type == "loss_aversion")
     assert la_fb.severity == "severe"
 
