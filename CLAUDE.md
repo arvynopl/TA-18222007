@@ -70,6 +70,9 @@ tests/
 - **OCS** = sigmoid(trade_frequency / max(performance_ratio, 0.01))  (Barber & Odean, 2000)
 - **LAI** = avg_hold_losers / max(avg_hold_winners, 1.0)  (Kahneman & Tversky, 1979)
 - **EMA**: BiasIntensity(t) = 0.3 × metric(t) + 0.7 × BiasIntensity(t−1)
+- **Survey Priors**: If UserSurvey exists, initial bias_intensity_vector
+  is set via compute_survey_priors() with SURVEY_PRIOR_WEIGHT damping.
+  Users without survey initialize at {0, 0, 0} (unchanged).
 
 ## Severity Thresholds (in config.py)
 | Bias | Mild | Moderate | Severe |
