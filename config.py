@@ -33,6 +33,14 @@ BETA: float = 0.2    # Recency weight for risk preference
 SURVEY_PRIOR_WEIGHT: float = 0.15  # Damping factor for survey-informed CDT priors
 CDT_STABILITY_WINDOW: int = 5  # Number of past sessions used for stability index
 
+# Adaptive alpha bounds for EMA (activity-weighted update rate)
+# Low-activity sessions use ALPHA; fully-active sessions use ALPHA_MAX.
+ALPHA_MAX: float = 0.45  # Upper bound for high-activity sessions (buy+sell fills all rounds)
+
+# CDT state snapshot & feedback
+LAI_EMA_CEILING: float = 3.0   # LAI is normalised as min(LAI/LAI_EMA_CEILING, 1) before EMA
+CDT_MODIFIER_STABILITY_THRESHOLD: float = 0.75  # Stability above this triggers pattern-persistence modifier
+
 # ---------------------------------------------------------------------------
 # Bias severity thresholds
 # ---------------------------------------------------------------------------
@@ -50,6 +58,10 @@ OCS_MILD: float = 0.2
 LAI_SEVERE: float = 2.0
 LAI_MODERATE: float = 1.5
 LAI_MILD: float = 1.2
+
+# Minimum realized trades required before DEI/LAI severity can exceed "mild"
+# Sessions with fewer than this many realized round-trips are capped at "mild"
+MIN_TRADES_FOR_FULL_SEVERITY: int = 3
 
 # ---------------------------------------------------------------------------
 # Stock catalog
@@ -96,3 +108,9 @@ def validate_config() -> None:
                 f"{label} thresholds must satisfy mild < moderate < severe, "
                 f"got mild={mild} moderate={moderate} severe={severe}"
             )
+    if not (ALPHA < ALPHA_MAX < 1):
+        raise ValueError(f"ALPHA_MAX must be in (ALPHA, 1), got ALPHA={ALPHA} ALPHA_MAX={ALPHA_MAX}")
+    if LAI_EMA_CEILING <= 0:
+        raise ValueError(f"LAI_EMA_CEILING must be > 0, got {LAI_EMA_CEILING}")
+    if MIN_TRADES_FOR_FULL_SEVERITY < 1:
+        raise ValueError(f"MIN_TRADES_FOR_FULL_SEVERITY must be >= 1, got {MIN_TRADES_FOR_FULL_SEVERITY}")

@@ -1,10 +1,10 @@
 """
 database/models.py — SQLAlchemy ORM entity definitions.
 
-Ten SQLAlchemy ORM entities + indexes (incl. UserSurvey):
+Eleven SQLAlchemy ORM entities + indexes (incl. UserSurvey, CdtSnapshot):
     User, StockCatalog, MarketSnapshot, UserAction,
     BiasMetric, CognitiveProfile, FeedbackHistory,
-    ConsentLog, UserSurvey, SessionSummary
+    ConsentLog, UserSurvey, SessionSummary, CdtSnapshot
 """
 
 from datetime import datetime, timezone, date as date_type
@@ -308,4 +308,44 @@ class SessionSummary(Base):
         return (
             f"<SessionSummary user={self.user_id} session={self.session_id[:8]}"
             f" status={self.status}>"
+        )
+
+
+class CdtSnapshot(Base):
+    """Point-in-time snapshot of the CognitiveProfile after each completed session.
+
+    Unlike CognitiveProfile (which holds only the *current* state), CdtSnapshot
+    preserves the full CDT state vector at the end of each session. This enables:
+      - Longitudinal CDT evolution charts in the thesis report (Bab VI)
+      - Reconstruction of past CDT states without replaying EMA history
+      - Validation that the CDT adapts meaningfully across sessions
+    """
+
+    __tablename__ = "cdt_snapshots"
+    __table_args__ = (
+        Index("ix_cdtsnapshot_user_session", "user_id", "session_id"),
+    )
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    user_id: int = Column(Integer, ForeignKey("users.id"), nullable=False)
+    session_id: str = Column(String(36), nullable=False)   # UUID of the session that produced this snapshot
+    session_number: int = Column(Integer, nullable=False)  # CognitiveProfile.session_count at snapshot time
+
+    # Bias intensity vector components
+    cdt_overconfidence: float = Column(Float, nullable=False, default=0.0)
+    cdt_disposition: float = Column(Float, nullable=False, default=0.0)
+    cdt_loss_aversion: float = Column(Float, nullable=False, default=0.0)
+
+    # Other CDT state
+    cdt_risk_preference: float = Column(Float, nullable=False, default=0.0)
+    cdt_stability_index: float = Column(Float, nullable=False, default=0.0)
+
+    snapshotted_at: datetime = Column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<CdtSnapshot user={self.user_id} session={self.session_id[:8]} "
+            f"#={self.session_number} OC={self.cdt_overconfidence:.3f}>"
         )
