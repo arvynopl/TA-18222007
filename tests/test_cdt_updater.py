@@ -160,3 +160,73 @@ def test_stability_erratic_sessions(db, user):
         _make_metric(db, user.id, ocs=ocs, dei=dei, lai=lai)
     si = compute_stability_index(db, user.id)
     assert si < 0.5, f"Expected stability < 0.5, got {si:.4f}"
+
+
+# ---------------------------------------------------------------------------
+# Survey prior integration
+# ---------------------------------------------------------------------------
+
+class TestSurveyPriorIntegration:
+
+    def test_profile_with_survey_uses_priors(self, db, user):
+        """User with survey gets non-zero initial bias vector."""
+        from database.models import UserSurvey
+        db.add(UserSurvey(
+            user_id=user.id, q_risk_tolerance=5,
+            q_loss_sensitivity=5, q_trading_frequency=5, q_holding_behavior=5,
+        ))
+        db.flush()
+        profile = get_or_create_profile(db, user.id)
+        bv = profile.bias_intensity_vector
+        assert bv["overconfidence"] > 0.0
+        assert bv["disposition"] > 0.0
+        assert bv["loss_aversion"] > 0.0
+        # Verify damping: max possible is SURVEY_PRIOR_WEIGHT
+        from config import SURVEY_PRIOR_WEIGHT
+        assert bv["overconfidence"] <= SURVEY_PRIOR_WEIGHT
+        assert bv["disposition"] <= SURVEY_PRIOR_WEIGHT
+        assert bv["loss_aversion"] <= SURVEY_PRIOR_WEIGHT
+
+    def test_profile_without_survey_uses_zeros(self, db, user):
+        """User without survey gets zero initial bias vector (regression)."""
+        profile = get_or_create_profile(db, user.id)
+        bv = profile.bias_intensity_vector
+        assert bv == {"overconfidence": 0.0, "disposition": 0.0, "loss_aversion": 0.0}
+
+    def test_survey_prior_convergence(self, db, user):
+        """After 3 EMA updates with zero observed bias, prior decays below 35%."""
+        from database.models import UserSurvey, BiasMetric
+        db.add(UserSurvey(
+            user_id=user.id, q_risk_tolerance=5,
+            q_loss_sensitivity=5, q_trading_frequency=5, q_holding_behavior=5,
+        ))
+        db.flush()
+        profile = get_or_create_profile(db, user.id)
+        initial_oc = profile.bias_intensity_vector["overconfidence"]
+
+        # Simulate 3 sessions with zero observed bias
+        for i in range(3):
+            metric = BiasMetric(
+                user_id=user.id, session_id=f"conv-test-{i}",
+                overconfidence_score=0.0, disposition_dei=0.0,
+                loss_aversion_index=0.0,
+            )
+            db.add(metric)
+            db.flush()
+            update_profile(db, user.id, metric, f"conv-test-{i}")
+
+        final_oc = profile.bias_intensity_vector["overconfidence"]
+        # After 3 updates: prior_weight = 0.7^3 = 0.343
+        assert final_oc < initial_oc * 0.35
+
+    def test_extreme_survey_below_mild_threshold(self, db, user):
+        """Even max survey responses don't exceed mild OCS threshold."""
+        from database.models import UserSurvey
+        from config import OCS_MILD
+        db.add(UserSurvey(
+            user_id=user.id, q_risk_tolerance=5,
+            q_loss_sensitivity=5, q_trading_frequency=5, q_holding_behavior=5,
+        ))
+        db.flush()
+        profile = get_or_create_profile(db, user.id)
+        assert profile.bias_intensity_vector["overconfidence"] < OCS_MILD
