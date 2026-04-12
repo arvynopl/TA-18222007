@@ -17,6 +17,7 @@ import logging
 
 from config import ALPHA, ALPHA_MAX, BETA, HIGH_VOLATILITY_CLASSES, LAI_EMA_CEILING, ROUNDS_PER_SESSION
 from database.models import BiasMetric, CognitiveProfile, UserAction, StockCatalog
+from modules.cdt.interaction import compute_interaction_scores
 from modules.cdt.profile import get_or_create_profile
 from modules.cdt.snapshot import save_cdt_snapshot
 from modules.cdt.stability import compute_stability_index
@@ -110,9 +111,10 @@ def update_profile(
         old.get("loss_aversion", 0.0), new_la,
     )
 
-    # --- Session count and stability ---
+    # --- Session count, stability, and cross-bias interaction scores ---
     profile.session_count += 1
     profile.stability_index = compute_stability_index(db_session, user_id)
+    profile.interaction_scores = compute_interaction_scores(db_session, user_id)
     profile.last_updated_at = datetime.now(timezone.utc)
 
     db_session.flush()

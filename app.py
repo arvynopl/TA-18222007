@@ -288,168 +288,169 @@ def _page_beranda() -> None:
             """
         )
 
-    st.divider()
-    st.subheader("Login / Daftar")
-
-    with st.form("login_form"):
-        alias = st.text_input(
-            "Nama / Alias",
-            placeholder="Masukkan nama atau alias kamu",
-            max_chars=64,
-        )
-        experience = st.selectbox(
-            "Tingkat Pengalaman Investasi",
-            options=["beginner", "intermediate", "advanced"],
-            format_func=lambda x: {"beginner": "Pemula", "intermediate": "Menengah", "advanced": "Berpengalaman"}[x],
-        )
-        st.caption(
-            "**Pemula:** Belum pernah atau jarang berinvestasi saham. "
-            "**Menengah:** Sudah aktif berinvestasi 1–3 tahun. "
-            "**Berpengalaman:** Investor aktif >3 tahun atau memiliki latar belakang keuangan formal."
-        )
-        submitted = st.form_submit_button("Masuk →", use_container_width=True, type="primary")
-
-    if submitted:
-        alias = alias.strip()
-        if not alias or len(alias) < 2:
-            st.error("Nama harus minimal 2 karakter.")
-            return
-        if not re.match(r'^[a-zA-Z0-9 ]+$', alias):
-            st.error("Nama hanya boleh mengandung huruf, angka, dan spasi.")
-            return
-
-        try:
-            with get_session() as sess:
-                user = sess.query(User).filter_by(alias=alias).first()
-                if user is None:
-                    user = User(alias=alias, experience_level=experience)
-                    sess.add(user)
-                    sess.flush()
-                    logger.info("New user created: alias=%r", alias)
-                    st.success(f"Akun baru dibuat untuk **{alias}**. Selamat datang!")
-                else:
-                    logger.info("Existing user login: alias=%r id=%d", alias, user.id)
-                    st.info(f"Selamat datang kembali, **{alias}**!")
-                uid = user.id
-                exp = user.experience_level
-        except IntegrityError:
-            st.error("Alias sudah digunakan oleh akun lain. Silakan pilih alias berbeda.")
-            return
-
-        st.session_state["user_id"] = uid
-        st.session_state["user_alias"] = alias
-        st.session_state["experience_level"] = exp
-
-        # Persist consent record for audit trail
-        if st.session_state.get("consent_given"):
-            from database.models import ConsentLog
-            try:
-                with get_session() as consent_sess:
-                    existing = consent_sess.query(ConsentLog).filter_by(
-                        user_id=uid, consent_given=True
-                    ).first()
-                    if not existing:
-                        consent_sess.add(ConsentLog(
-                            user_id=uid,
-                            consent_given=True,
-                            consent_text="Saya telah membaca informasi penelitian dan menyetujui partisipasi.",
-                        ))
-            except Exception:
-                logger.warning("Failed to persist consent log for user %d", uid)
-
-        # Check if user already completed survey
-        from database.models import UserSurvey
-        try:
-            with get_session() as check_sess:
-                has_survey = check_sess.query(UserSurvey).filter_by(user_id=uid).first() is not None
-        except Exception:
-            has_survey = True  # fail-safe: skip survey on error
-
-        if not has_survey:
-            st.session_state["show_survey"] = True
-            st.rerun()
-        else:
-            st.session_state["current_page"] = "Simulasi Investasi"
-            st.rerun()
-
-    # --- Optional Risk Preference Survey ---
-    if st.session_state.get("show_survey") and st.session_state.get("user_id"):
+    if not user_id:
         st.divider()
-        with st.expander("📋 Isi Survei Preferensi Risiko (Opsional)", expanded=True):
-            st.caption(
-                "Survei ini membantu peneliti membandingkan preferensi yang Anda "
-                "nyatakan dengan perilaku aktual di simulasi. Data tidak memengaruhi "
-                "simulasi atau skor Anda. Anda dapat melewati survei ini."
+        st.subheader("Login / Daftar")
+
+        with st.form("login_form"):
+            alias = st.text_input(
+                "Nama / Alias",
+                placeholder="Masukkan nama atau alias kamu",
+                max_chars=64,
             )
+            experience = st.selectbox(
+                "Tingkat Pengalaman Investasi",
+                options=["beginner", "intermediate", "advanced"],
+                format_func=lambda x: {"beginner": "Pemula", "intermediate": "Menengah", "advanced": "Berpengalaman"}[x],
+            )
+            st.caption(
+                "**Pemula:** Belum pernah atau jarang berinvestasi saham. "
+                "**Menengah:** Sudah aktif berinvestasi 1–3 tahun. "
+                "**Berpengalaman:** Investor aktif >3 tahun atau memiliki latar belakang keuangan formal."
+            )
+            submitted = st.form_submit_button("Masuk →", use_container_width=True, type="primary")
 
-            LIKERT_LABELS = {
-                1: "1 — Sangat Tidak Setuju",
-                2: "2 — Tidak Setuju",
-                3: "3 — Netral",
-                4: "4 — Setuju",
-                5: "5 — Sangat Setuju",
-            }
+        if submitted:
+            alias = alias.strip()
+            if not alias or len(alias) < 2:
+                st.error("Nama harus minimal 2 karakter.")
+                return
+            if not re.match(r'^[a-zA-Z0-9 ]+$', alias):
+                st.error("Nama hanya boleh mengandung huruf, angka, dan spasi.")
+                return
 
-            with st.form("survey_form"):
-                q1 = st.select_slider(
-                    "Saya bersedia mengambil risiko tinggi demi potensi keuntungan besar.",
-                    options=[1, 2, 3, 4, 5],
-                    value=3,
-                    format_func=lambda x: LIKERT_LABELS[x],
-                )
-                q2 = st.select_slider(
-                    "Saya merasa sangat terganggu ketika investasi saya mengalami kerugian sementara.",
-                    options=[1, 2, 3, 4, 5],
-                    value=3,
-                    format_func=lambda x: LIKERT_LABELS[x],
-                )
-                q3 = st.select_slider(
-                    "Saya merasa perlu sering melakukan transaksi untuk mendapatkan hasil optimal.",
-                    options=[1, 2, 3, 4, 5],
-                    value=3,
-                    format_func=lambda x: LIKERT_LABELS[x],
-                )
-                q4 = st.select_slider(
-                    "Ketika harga saham turun, saya cenderung menahan saham tersebut daripada menjualnya.",
-                    options=[1, 2, 3, 4, 5],
-                    value=3,
-                    format_func=lambda x: LIKERT_LABELS[x],
-                )
+            try:
+                with get_session() as sess:
+                    user = sess.query(User).filter_by(alias=alias).first()
+                    if user is None:
+                        user = User(alias=alias, experience_level=experience)
+                        sess.add(user)
+                        sess.flush()
+                        logger.info("New user created: alias=%r", alias)
+                        st.success(f"Akun baru dibuat untuk **{alias}**. Selamat datang!")
+                    else:
+                        logger.info("Existing user login: alias=%r id=%d", alias, user.id)
+                        st.info(f"Selamat datang kembali, **{alias}**!")
+                    uid = user.id
+                    exp = user.experience_level
+            except IntegrityError:
+                st.error("Alias sudah digunakan oleh akun lain. Silakan pilih alias berbeda.")
+                return
 
-                col_submit, col_skip = st.columns(2)
-                with col_submit:
-                    survey_submitted = st.form_submit_button(
-                        "Simpan Survei", use_container_width=True, type="primary"
-                    )
-                with col_skip:
-                    survey_skipped = st.form_submit_button(
-                        "Lewati →", use_container_width=True
-                    )
+            st.session_state["user_id"] = uid
+            st.session_state["user_alias"] = alias
+            st.session_state["experience_level"] = exp
 
-            if survey_submitted:
-                uid = st.session_state["user_id"]
+            # Persist consent record for audit trail
+            if st.session_state.get("consent_given"):
+                from database.models import ConsentLog
                 try:
-                    from database.models import UserSurvey
-                    with get_session() as survey_sess:
-                        survey_sess.add(UserSurvey(
-                            user_id=uid,
-                            q_risk_tolerance=q1,
-                            q_loss_sensitivity=q2,
-                            q_trading_frequency=q3,
-                            q_holding_behavior=q4,
-                        ))
-                    st.success("Survei berhasil disimpan. Terima kasih!")
+                    with get_session() as consent_sess:
+                        existing = consent_sess.query(ConsentLog).filter_by(
+                            user_id=uid, consent_given=True
+                        ).first()
+                        if not existing:
+                            consent_sess.add(ConsentLog(
+                                user_id=uid,
+                                consent_given=True,
+                                consent_text="Saya telah membaca informasi penelitian dan menyetujui partisipasi.",
+                            ))
                 except Exception:
-                    logger.warning("Failed to save survey for user %d", uid)
+                    logger.warning("Failed to persist consent log for user %d", uid)
 
-                st.session_state["show_survey"] = False
+            # Check if user already completed survey
+            from database.models import UserSurvey
+            try:
+                with get_session() as check_sess:
+                    has_survey = check_sess.query(UserSurvey).filter_by(user_id=uid).first() is not None
+            except Exception:
+                has_survey = True  # fail-safe: skip survey on error
+
+            if not has_survey:
+                st.session_state["show_survey"] = True
+                st.rerun()
+            else:
                 st.session_state["current_page"] = "Simulasi Investasi"
                 st.rerun()
 
-            if survey_skipped:
-                st.session_state["show_survey"] = False
-                st.session_state["current_page"] = "Simulasi Investasi"
-                st.rerun()
+        # --- Optional Risk Preference Survey ---
+        if st.session_state.get("show_survey") and st.session_state.get("user_id"):
+            st.divider()
+            with st.expander("📋 Isi Survei Preferensi Risiko (Opsional)", expanded=True):
+                st.caption(
+                    "Survei ini membantu peneliti membandingkan preferensi yang Anda "
+                    "nyatakan dengan perilaku aktual di simulasi. Data tidak memengaruhi "
+                    "simulasi atau skor Anda. Anda dapat melewati survei ini."
+                )
+
+                LIKERT_LABELS = {
+                    1: "1 — Sangat Tidak Setuju",
+                    2: "2 — Tidak Setuju",
+                    3: "3 — Netral",
+                    4: "4 — Setuju",
+                    5: "5 — Sangat Setuju",
+                }
+
+                with st.form("survey_form"):
+                    q1 = st.select_slider(
+                        "Saya bersedia mengambil risiko tinggi demi potensi keuntungan besar.",
+                        options=[1, 2, 3, 4, 5],
+                        value=3,
+                        format_func=lambda x: LIKERT_LABELS[x],
+                    )
+                    q2 = st.select_slider(
+                        "Saya merasa sangat terganggu ketika investasi saya mengalami kerugian sementara.",
+                        options=[1, 2, 3, 4, 5],
+                        value=3,
+                        format_func=lambda x: LIKERT_LABELS[x],
+                    )
+                    q3 = st.select_slider(
+                        "Saya merasa perlu sering melakukan transaksi untuk mendapatkan hasil optimal.",
+                        options=[1, 2, 3, 4, 5],
+                        value=3,
+                        format_func=lambda x: LIKERT_LABELS[x],
+                    )
+                    q4 = st.select_slider(
+                        "Ketika harga saham turun, saya cenderung menahan saham tersebut daripada menjualnya.",
+                        options=[1, 2, 3, 4, 5],
+                        value=3,
+                        format_func=lambda x: LIKERT_LABELS[x],
+                    )
+
+                    col_submit, col_skip = st.columns(2)
+                    with col_submit:
+                        survey_submitted = st.form_submit_button(
+                            "Simpan Survei", use_container_width=True, type="primary"
+                        )
+                    with col_skip:
+                        survey_skipped = st.form_submit_button(
+                            "Lewati →", use_container_width=True
+                        )
+
+                if survey_submitted:
+                    uid = st.session_state["user_id"]
+                    try:
+                        from database.models import UserSurvey
+                        with get_session() as survey_sess:
+                            survey_sess.add(UserSurvey(
+                                user_id=uid,
+                                q_risk_tolerance=q1,
+                                q_loss_sensitivity=q2,
+                                q_trading_frequency=q3,
+                                q_holding_behavior=q4,
+                            ))
+                        st.success("Survei berhasil disimpan. Terima kasih!")
+                    except Exception:
+                        logger.warning("Failed to save survey for user %d", uid)
+
+                    st.session_state["show_survey"] = False
+                    st.session_state["current_page"] = "Simulasi Investasi"
+                    st.rerun()
+
+                if survey_skipped:
+                    st.session_state["show_survey"] = False
+                    st.session_state["current_page"] = "Simulasi Investasi"
+                    st.rerun()
 
 
 # ---------------------------------------------------------------------------
@@ -483,6 +484,7 @@ def _page_profil() -> None:
             for i, m in enumerate(past_metrics)
         ]
         profile_data = None
+        anomaly_data = None
         if profile:
             profile_data = {
                 "bias_vector": dict(profile.bias_intensity_vector),
@@ -490,7 +492,11 @@ def _page_profil() -> None:
                 "stability_index": profile.stability_index,
                 "session_count": profile.session_count,
                 "last_updated_at": profile.last_updated_at,
+                "interaction_scores": profile.interaction_scores,
             }
+            # Fetch ML anomaly flags (requires sklearn; silently degrades)
+            from modules.cdt.ml_validator import compute_anomaly_flags
+            anomaly_data = compute_anomaly_flags(sess, user_id)
 
     if profile_data is None:
         st.info("Selesaikan setidaknya satu sesi simulasi untuk melihat profil kognitifmu.")
@@ -584,6 +590,106 @@ def _page_profil() -> None:
         line_fig.update_yaxes(title_text="Intensitas Bias (0–1)", range=[0, 1])
         apply_chart_theme(line_fig, height=380)
         st.plotly_chart(line_fig, use_container_width=True)
+
+    # --- Cross-Bias Interaction Scores ---
+    interaction = profile_data.get("interaction_scores")
+    if interaction:
+        st.subheader("🔗 Interaksi Antar Bias")
+        st.caption(
+            "Korelasi Pearson antara bias-biasmu. Nilai mendekati +1 berarti dua bias "
+            "sering muncul bersamaan; mendekati -1 berarti saling berlawanan."
+        )
+
+        def _fmt_corr(v) -> str:
+            if v is None:
+                return "—"
+            bar = "█" * int(abs(v) * 10)
+            direction = "+" if v >= 0 else "−"
+            return f"{direction}{abs(v):.2f} {bar}"
+
+        ic1, ic2, ic3 = st.columns(3)
+        ic1.metric(
+            "OCS ↔ |DEI|",
+            _fmt_corr(interaction.get("ocs_dei")),
+            help="Korelasi antara Overconfidence dan Efek Disposisi",
+            delta=" ", delta_color="off",
+        )
+        ic2.metric(
+            "OCS ↔ LAI",
+            _fmt_corr(interaction.get("ocs_lai")),
+            help="Korelasi antara Overconfidence dan Loss Aversion",
+            delta=" ", delta_color="off",
+        )
+        ic3.metric(
+            "│DEI│ ↔ LAI",
+            _fmt_corr(interaction.get("dei_lai")),
+            help="Korelasi antara Efek Disposisi dan Loss Aversion",
+            delta=" ", delta_color="off",
+        )
+
+        # Narrative interpretation for the strongest pair
+        valid_pairs = {k: v for k, v in interaction.items() if v is not None}
+        if valid_pairs:
+            strongest_pair = max(valid_pairs, key=lambda k: abs(valid_pairs[k]))
+            val = valid_pairs[strongest_pair]
+            pair_names = {
+                "ocs_dei": "Overconfidence dan Efek Disposisi",
+                "ocs_lai": "Overconfidence dan Loss Aversion",
+                "dei_lai": "Efek Disposisi dan Loss Aversion",
+            }
+            if abs(val) >= 0.6:
+                direction = "cenderung muncul bersamaan" if val > 0 else "saling berlawanan"
+                st.info(
+                    f"💡 **{pair_names[strongest_pair]}** {direction} (r={val:+.2f}). "
+                    f"Ini menunjukkan pola perilaku yang saling terkait pada profilmu."
+                )
+
+    # --- ML Anomaly Detection Panel ---
+    if anomaly_data:
+        st.subheader("🤖 Deteksi Sesi Anomali (ML)")
+        n = anomaly_data["n_sessions"]
+        n_anomaly = sum(anomaly_data["is_anomaly"])
+        st.caption(
+            f"Isolation Forest dijalankan pada {n} sesi. "
+            f"Sesi yang strukturnya menyimpang dari baseline perilakumu ditandai sebagai anomali."
+        )
+
+        if n_anomaly == 0:
+            st.success(
+                "✅ Tidak ada sesi anomali terdeteksi — pola biasmu konsisten di semua sesi."
+            )
+        else:
+            st.warning(
+                f"⚠️ {n_anomaly} dari {n} sesi menunjukkan profil bias yang tidak biasa. "
+                f"Ini bisa berarti kamu bereksperimen dengan strategi berbeda, "
+                f"atau kondisi pasar mendorong perilaku yang tidak khas."
+            )
+
+        import pandas as pd
+        rows = []
+        for i, (sid, score, flag) in enumerate(
+            zip(
+                anomaly_data["session_ids"],
+                anomaly_data["anomaly_scores"],
+                anomaly_data["is_anomaly"],
+            )
+        ):
+            rows.append({
+                "Sesi": f"#{i + 1}",
+                "Anomali": "⚠️ Ya" if flag else "✅ Normal",
+                "Skor": f"{score:.3f}",
+                "ID (8 digit)": sid[:8],
+            })
+        df = pd.DataFrame(rows)
+        st.dataframe(df, use_container_width=True, hide_index=True)
+    elif profile_data["session_count"] > 0:
+        from modules.cdt.ml_validator import _MIN_SESSIONS_FOR_ML
+        remaining = _MIN_SESSIONS_FOR_ML - profile_data["session_count"]
+        if remaining > 0:
+            st.caption(
+                f"🤖 Deteksi anomali ML tersedia setelah {_MIN_SESSIONS_FOR_ML} sesi "
+                f"(butuh {remaining} sesi lagi)."
+            )
 
     # --- Insight section ---
     st.subheader("💡 Insight")

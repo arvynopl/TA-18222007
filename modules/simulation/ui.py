@@ -191,7 +191,7 @@ def _build_full_chart(
     apply_chart_theme(fig, height=420)
     fig.update_yaxes(title_text="Harga (Rp)", row=1, col=1, gridcolor="rgba(255,255,255,0.08)")
     fig.update_yaxes(title_text="Volume", row=2, col=1, gridcolor="rgba(255,255,255,0.08)")
-    fig.update_xaxes(gridcolor="rgba(255,255,255,0.08)")
+    fig.update_xaxes(type="category", gridcolor="rgba(255,255,255,0.08)")
     return fig
 
 
@@ -476,6 +476,11 @@ def _execute_round(
         with st.spinner("Menganalisis keputusan investasi kamu…"):
             try:
                 _run_post_session_pipeline(user_id, session_id)
+                # Pipeline succeeded — auto-redirect to results page.
+                st.session_state["last_session_id"] = session_id
+                st.session_state["current_page"] = "Hasil Analisis & Umpan Balik"
+                reset_simulation()
+                st.rerun()
             except Exception:
                 st.error(
                     "Terjadi kesalahan saat menganalisis sesi. "
