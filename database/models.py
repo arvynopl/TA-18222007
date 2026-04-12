@@ -197,6 +197,9 @@ class CognitiveProfile(Base):
 
     risk_preference: float = Column(Float, nullable=False, default=0.0)
     stability_index: float = Column(Float, nullable=False, default=0.0)
+    # JSON: {"ocs_dei": float|null, "ocs_lai": float|null, "dei_lai": float|null}
+    # Null values indicate insufficient data or zero-variance series.
+    interaction_scores: Optional[dict] = Column(JSON, nullable=True, default=None)
     session_count: int = Column(Integer, nullable=False, default=0)
     last_updated_at: datetime = Column(DateTime, nullable=True)
 
@@ -348,4 +351,39 @@ class CdtSnapshot(Base):
         return (
             f"<CdtSnapshot user={self.user_id} session={self.session_id[:8]} "
             f"#={self.session_number} OC={self.cdt_overconfidence:.3f}>"
+        )
+
+
+class PostSessionSurvey(Base):
+    """Post-session self-assessment survey: user's self-rated bias awareness.
+
+    Captured after the feedback page is viewed so responses reflect post-feedback
+    metacognition. Compared against system-detected severity for thesis analysis.
+    """
+
+    __tablename__ = "post_session_surveys"
+    __table_args__ = (
+        UniqueConstraint("user_id", "session_id", name="uq_post_survey_user_session"),
+    )
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    user_id: int = Column(Integer, ForeignKey("users.id"), nullable=False)
+    session_id: str = Column(String(36), nullable=False)
+
+    # Self-assessed bias awareness: 1 = tidak menyadari sama sekali, 5 = sangat menyadari
+    self_overconfidence: int = Column(Integer, nullable=False)
+    self_disposition: int = Column(Integer, nullable=False)
+    self_loss_aversion: int = Column(Integer, nullable=False)
+
+    # Overall feedback usefulness: 1 = tidak berguna, 5 = sangat berguna
+    feedback_usefulness: int = Column(Integer, nullable=False)
+
+    submitted_at: datetime = Column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<PostSessionSurvey user={self.user_id} session={self.session_id[:8]} "
+            f"OC={self.self_overconfidence} DEI={self.self_disposition} LA={self.self_loss_aversion}>"
         )
