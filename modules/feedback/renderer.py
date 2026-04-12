@@ -276,7 +276,118 @@ def render_feedback_page(user_id: int, session_id: str) -> None:
 
     render_longitudinal_section(user_id)
 
-    st.markdown("---")
-    if st.button("Lihat Profil Kognitif Saya →", use_container_width=True):
-        st.session_state["current_page"] = "Profil Kognitif Saya"
-        st.rerun()
+    # --- Session navigation CTAs ---
+    st.divider()
+    col_new, col_profile = st.columns(2)
+    with col_new:
+        if st.button("🔄 Mulai Sesi Baru", use_container_width=True, type="primary"):
+            st.session_state["current_page"] = "Simulasi Investasi"
+            st.rerun()
+    with col_profile:
+        if st.button("🧠 Lihat Profil Kognitif →", use_container_width=True):
+            st.session_state["current_page"] = "Profil Kognitif Saya"
+            st.rerun()
+
+    # --- Post-Session Self-Assessment Survey ---
+    _render_post_session_survey(user_id=user_id, session_id=session_id)
+
+
+def _render_post_session_survey(user_id: int, session_id: str) -> None:
+    """Render the post-session self-assessment survey if not yet submitted.
+
+    Shows a 4-question Likert survey capturing self-assessed bias awareness
+    and feedback usefulness. Persisted as PostSessionSurvey in the database.
+    Idempotent — does not re-render if already submitted for this session.
+    """
+    from database.models import PostSessionSurvey
+
+    # Check if already submitted for this session
+    with get_session() as check_sess:
+        already_submitted = (
+            check_sess.query(PostSessionSurvey)
+            .filter_by(user_id=user_id, session_id=session_id)
+            .first()
+        ) is not None
+
+    if already_submitted:
+        st.caption("✅ Survei evaluasi diri untuk sesi ini sudah diisi. Terima kasih!")
+        return
+
+    st.divider()
+    with st.expander("📝 Evaluasi Diri: Seberapa Menyadari Kamu Biasmu?", expanded=True):
+        st.caption(
+            "Jawab pertanyaan berikut berdasarkan perasaanmu **sebelum** melihat hasil "
+            "analisis di atas. Jawaban kamu membantu penelitian ini memahami seberapa "
+            "efektif umpan balik CDT dalam meningkatkan kesadaran diri investor."
+        )
+
+        LIKERT = {
+            1: "1 — Tidak menyadari sama sekali",
+            2: "2 — Sedikit menyadari",
+            3: "3 — Cukup menyadari",
+            4: "4 — Menyadari",
+            5: "5 — Sangat menyadari",
+        }
+        USEFULNESS = {
+            1: "1 — Tidak berguna",
+            2: "2 — Kurang berguna",
+            3: "3 — Cukup berguna",
+            4: "4 — Berguna",
+            5: "5 — Sangat berguna",
+        }
+
+        with st.form(f"post_survey_{session_id[:8]}"):
+            q_oc = st.select_slider(
+                "Seberapa menyadari kamu potensi **overconfidence** (terlalu sering trading) "
+                "dalam keputusanmu selama sesi ini?",
+                options=[1, 2, 3, 4, 5],
+                value=3,
+                format_func=lambda x: LIKERT[x],
+            )
+            q_dei = st.select_slider(
+                "Seberapa menyadari kamu potensi **efek disposisi** (menjual saham untung "
+                "terlalu cepat / menahan saham rugi) dalam sesi ini?",
+                options=[1, 2, 3, 4, 5],
+                value=3,
+                format_func=lambda x: LIKERT[x],
+            )
+            q_lai = st.select_slider(
+                "Seberapa menyadari kamu kecenderungan **loss aversion** (enggan melepas "
+                "posisi merugi) yang mungkin memengaruhi keputusanmu?",
+                options=[1, 2, 3, 4, 5],
+                value=3,
+                format_func=lambda x: LIKERT[x],
+            )
+            q_use = st.select_slider(
+                "Seberapa berguna umpan balik yang kamu terima dari sistem ini?",
+                options=[1, 2, 3, 4, 5],
+                value=3,
+                format_func=lambda x: USEFULNESS[x],
+            )
+
+            submitted = st.form_submit_button(
+                "Kirim Evaluasi Diri", use_container_width=True, type="primary"
+            )
+
+        if submitted:
+            try:
+                with get_session() as save_sess:
+                    save_sess.add(PostSessionSurvey(
+                        user_id=user_id,
+                        session_id=session_id,
+                        self_overconfidence=q_oc,
+                        self_disposition=q_dei,
+                        self_loss_aversion=q_lai,
+                        feedback_usefulness=q_use,
+                    ))
+                st.success(
+                    "Terima kasih atas evaluasimu! Data ini sangat membantu penelitian. 🙏"
+                )
+                st.rerun()
+            except Exception:
+                import logging as _log
+                _log.getLogger(__name__).warning(
+                    "Failed to save PostSessionSurvey for user=%d session=%s",
+                    user_id, session_id,
+                )
+                st.warning("Gagal menyimpan survei. Silakan coba lagi.")
