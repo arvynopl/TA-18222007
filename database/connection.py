@@ -14,7 +14,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import Generator, Optional
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -40,9 +40,30 @@ def get_engine() -> Engine:
     return _engine
 
 
+def _apply_schema_migrations(engine: Engine) -> None:
+    """Add any columns present in ORM models but missing from existing DB tables.
+
+    Idempotent: skips columns that already exist. Extend this list whenever a
+    new column is added to an existing model without a full DB reset.
+    """
+    inspector = inspect(engine)
+    migrations = [
+        # (table_name, column_name, column_definition)
+        ("cognitive_profiles", "interaction_scores", "JSON DEFAULT NULL"),
+    ]
+    with engine.connect() as conn:
+        for table, column, col_def in migrations:
+            existing = {col["name"] for col in inspector.get_columns(table)}
+            if column not in existing:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_def}"))
+                conn.commit()
+
+
 def init_db() -> None:
     """Create all tables defined in models.py (no-op if they already exist)."""
-    Base.metadata.create_all(bind=get_engine())
+    engine = get_engine()
+    Base.metadata.create_all(bind=engine)
+    _apply_schema_migrations(engine)
 
 
 def _get_session_factory() -> sessionmaker:
