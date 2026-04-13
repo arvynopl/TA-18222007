@@ -183,6 +183,55 @@ def render_longitudinal_section(user_id: int) -> None:
                 )
 
 
+def render_interaction_synthesis(user_id: int, session_id: str) -> None:
+    """Render a coupled-bias synthesis card when strong interactions are detected.
+
+    Reads CognitiveProfile.interaction_scores (already stored) and calls
+    _get_interaction_modifier() from the generator. Only renders when at least
+    one pairwise Pearson r exceeds the threshold AND session_count >= 5.
+
+    Args:
+        user_id:    ID of the user.
+        session_id: UUID of the current session (unused directly; passed for
+                    future extensibility).
+    """
+    from database.models import CognitiveProfile
+    from modules.feedback.generator import _get_interaction_modifier
+
+    with get_session() as sess:
+        profile = sess.query(CognitiveProfile).filter_by(user_id=user_id).first()
+        if profile is None:
+            return
+        # Snapshot relevant fields before session closes
+        session_count = profile.session_count
+        interaction_scores = profile.interaction_scores
+        stability_index = profile.stability_index
+
+    # Build a temporary profile-like namespace for the modifier function
+    # (avoids DetachedInstanceError — all data already extracted above)
+    class _ProfileSnapshot:
+        pass
+
+    snap = _ProfileSnapshot()
+    snap.session_count = session_count
+    snap.interaction_scores = interaction_scores
+    snap.stability_index = stability_index
+
+    insights = _get_interaction_modifier(snap)  # type: ignore[arg-type]
+    if not insights:
+        return
+
+    st.markdown("---")
+    st.subheader("🔗 Pola Bias Gabungan")
+    st.caption(
+        "Analisis keterkaitan antar-bias berdasarkan riwayat multi-sesi kamu. "
+        "Pola ini terdeteksi hanya setelah minimal 5 sesi selesai."
+    )
+
+    for insight in insights:
+        st.info(insight)
+
+
 def render_feedback_page(user_id: int, session_id: str) -> None:
     """Render the complete post-session feedback page.
 
@@ -275,6 +324,8 @@ def render_feedback_page(user_id: int, session_id: str) -> None:
         )
 
     render_longitudinal_section(user_id)
+
+    render_interaction_synthesis(user_id=user_id, session_id=session_id)
 
     # --- Session navigation CTAs ---
     st.divider()
