@@ -23,6 +23,7 @@ import logging
 from config import (
     CDT_MODIFIER_STABILITY_THRESHOLD,
     DEI_MILD, DEI_MODERATE, DEI_SEVERE,
+    LAI_EMA_CEILING,
     LAI_MILD, LAI_MODERATE, LAI_SEVERE,
     MIN_TRADES_FOR_FULL_SEVERITY,
     OCS_MILD, OCS_MODERATE, OCS_SEVERE,
@@ -121,6 +122,80 @@ def compute_counterfactual(
 
 _SEVERITY_RANK: dict[str, int] = {"none": 0, "mild": 1, "moderate": 2, "severe": 3}
 
+_INTERACTION_THRESHOLD = 0.65  # Strong coupling threshold (Cohen 1988)
+_MIN_SESSIONS_FOR_INTERACTION = 5
+
+_BIAS_METRIC_KEY: dict[str, str] = {
+    "overconfidence": "overconfidence_score",
+    "disposition_effect": "disposition_dei",
+    "loss_aversion": "loss_aversion_index",
+}
+
+
+def _classify_bias_trajectory(
+    db_session: Session,
+    user_id: int,
+    current_session_id: str,
+    bias_type: str,
+) -> str:
+    """Classify the 3-session trend for a specific bias type.
+
+    Fetches the last 3 BiasMetric records (excluding the current session),
+    normalises the relevant metric to [0, 1], and returns a trajectory label.
+
+    Normalisation (mirrors stability index logic):
+      - overconfidence_score: already in [0, 1) — unchanged.
+      - disposition_dei: abs(DEI) — captures magnitude regardless of sign.
+      - loss_aversion_index: min(LAI / LAI_EMA_CEILING, 1.0).
+
+    Returns:
+        "improving"   — strictly decreasing over the 3 sessions (oldest→newest)
+        "worsening"   — strictly increasing over the 3 sessions
+        "volatile"    — non-monotonic (oscillating) pattern
+        "stable"      — all three values within 0.05 of each other
+        "insufficient"— fewer than 3 prior sessions available
+    """
+    col_name = _BIAS_METRIC_KEY.get(bias_type)
+    if col_name is None:
+        return "insufficient"
+
+    prior_metrics = (
+        db_session.query(BiasMetric)
+        .filter(
+            BiasMetric.user_id == user_id,
+            BiasMetric.session_id != current_session_id,
+        )
+        .order_by(BiasMetric.computed_at.asc())
+        .all()
+    )
+
+    if len(prior_metrics) < 3:
+        return "insufficient"
+
+    # Take last 3 prior sessions (oldest → newest for trend direction)
+    last_three = prior_metrics[-3:]
+
+    def _normalize(metric: BiasMetric) -> float:
+        if bias_type == "overconfidence":
+            return metric.overconfidence_score or 0.0
+        elif bias_type == "disposition_effect":
+            return abs(metric.disposition_dei or 0.0)
+        else:  # loss_aversion
+            return min((metric.loss_aversion_index or 0.0) / LAI_EMA_CEILING, 1.0)
+
+    vals = [_normalize(m) for m in last_three]
+    a, b, c = vals[0], vals[1], vals[2]
+
+    # Stability band: all values within 0.05 of each other → stable
+    if max(vals) - min(vals) < 0.05:
+        return "stable"
+
+    if c < b < a:
+        return "improving"
+    if c > b > a:
+        return "worsening"
+    return "volatile"
+
 
 def _get_cdt_modifier(
     db_session: Session,
@@ -132,14 +207,15 @@ def _get_cdt_modifier(
 ) -> str:
     """Generate a CDT-aware contextual sentence appended to feedback explanation.
 
-    Returns an empty string when:
-      - Fewer than 3 sessions have been completed (insufficient longitudinal data)
-      - No notable trend or stability pattern is detected
+    Uses 3-session trajectory analysis when ≥ 3 prior sessions exist.
+    Falls back to single-lag comparison for exactly 2 prior sessions.
+    Returns empty string when fewer than 3 total sessions are completed
+    or when no notable trend or stability pattern is detected.
 
     Args:
         db_session:       Active SQLAlchemy session.
         user_id:          ID of the user.
-        session_id:       Current session UUID (excluded from previous-feedback lookup).
+        session_id:       Current session UUID (excluded from prior-metric queries).
         bias_type:        One of "overconfidence", "disposition_effect", "loss_aversion".
         current_severity: Severity label for this session.
         profile:          Current CognitiveProfile.
@@ -150,30 +226,58 @@ def _get_cdt_modifier(
     if profile.session_count < 3:
         return ""
 
-    curr_rank = _SEVERITY_RANK.get(current_severity, 0)
     modifiers: list[str] = []
 
-    # Trend vs. previous session
-    prev_feedback = (
-        db_session.query(FeedbackHistory)
-        .filter_by(user_id=user_id, bias_type=bias_type)
-        .filter(FeedbackHistory.session_id != session_id)
-        .order_by(FeedbackHistory.delivered_at.desc())
-        .first()
+    # --- 3-session trajectory analysis ---
+    trajectory = _classify_bias_trajectory(
+        db_session, user_id, session_id, bias_type
     )
 
-    if prev_feedback:
-        prev_rank = _SEVERITY_RANK.get(prev_feedback.severity, 0)
-        if curr_rank < prev_rank and current_severity != "none":
-            modifiers.append(
-                "Perkembangan positif: kecenderungan bias ini menurun dibanding sesi sebelumnya."
-            )
-        elif curr_rank > prev_rank:
-            modifiers.append(
-                "Perhatian: intensitas bias ini meningkat dari sesi sebelumnya."
-            )
+    if trajectory == "improving" and current_severity != "none":
+        modifiers.append(
+            "Tren positif terdeteksi: intensitas bias ini menurun secara konsisten "
+            "dalam 3 sesi terakhir — umpan balik yang kamu terima menunjukkan dampak."
+        )
+    elif trajectory == "improving" and current_severity == "none":
+        modifiers.append(
+            "Tren positif terdeteksi: bias ini tidak lagi signifikan setelah menurun "
+            "secara konsisten dalam 3 sesi terakhir. Pertahankan pola ini!"
+        )
+    elif trajectory == "worsening":
+        modifiers.append(
+            "Perhatian: intensitas bias ini meningkat secara konsisten dalam 3 sesi "
+            "terakhir. Tinjau kembali strategi keputusan investasimu secara mendasar."
+        )
+    elif trajectory == "volatile":
+        modifiers.append(
+            "Pola tidak konsisten: bias ini berfluktuasi antar sesi, mengindikasikan "
+            "bahwa keputusanmu mungkin dipengaruhi oleh kondisi pasar sesi tertentu "
+            "daripada pola perilaku yang menetap."
+        )
+    elif trajectory == "insufficient":
+        # Fewer than 3 prior sessions — fall back to single-lag comparison
+        prev_feedback = (
+            db_session.query(FeedbackHistory)
+            .filter_by(user_id=user_id, bias_type=bias_type)
+            .filter(FeedbackHistory.session_id != session_id)
+            .order_by(FeedbackHistory.delivered_at.desc())
+            .first()
+        )
+        if prev_feedback:
+            curr_rank = _SEVERITY_RANK.get(current_severity, 0)
+            prev_rank = _SEVERITY_RANK.get(prev_feedback.severity, 0)
+            if curr_rank < prev_rank and current_severity != "none":
+                modifiers.append(
+                    "Perkembangan positif: kecenderungan bias ini menurun dibanding "
+                    "sesi sebelumnya."
+                )
+            elif curr_rank > prev_rank:
+                modifiers.append(
+                    "Perhatian: intensitas bias ini meningkat dari sesi sebelumnya."
+                )
+    # trajectory == "stable": no modifier needed (no trend to report)
 
-    # Persistent-pattern warning for stable but elevated bias
+    # --- Persistent-pattern warning (independent of trajectory) ---
     if (
         profile.stability_index > CDT_MODIFIER_STABILITY_THRESHOLD
         and current_severity in ("moderate", "severe")
@@ -184,6 +288,88 @@ def _get_cdt_modifier(
         )
 
     return " ".join(modifiers)
+
+
+def _get_interaction_modifier(profile: CognitiveProfile) -> list[str]:
+    """Return Bahasa Indonesia insight strings for strong cross-bias couplings.
+
+    Reads interaction_scores from the CognitiveProfile (already computed and
+    stored by update_profile() via compute_interaction_scores()).
+
+    Returns an empty list when:
+      - session_count < _MIN_SESSIONS_FOR_INTERACTION (insufficient data)
+      - interaction_scores is None or empty
+      - No pairwise r exceeds ±_INTERACTION_THRESHOLD
+
+    Returns:
+        List of insight strings (Bahasa Indonesia). Typically 0–2 items.
+    """
+    if profile.session_count < _MIN_SESSIONS_FOR_INTERACTION:
+        return []
+
+    scores = profile.interaction_scores
+    if not scores:
+        return []
+
+    insights: list[str] = []
+
+    ocs_dei = scores.get("ocs_dei")
+    ocs_lai = scores.get("ocs_lai")
+    dei_lai = scores.get("dei_lai")
+
+    # OCS ↔ DEI: Overtrading often co-occurs with premature winner liquidation
+    if ocs_dei is not None and abs(ocs_dei) >= _INTERACTION_THRESHOLD:
+        if ocs_dei > 0:
+            insights.append(
+                "Sistem mendeteksi pola gabungan antara overconfidence dan efek "
+                "disposisi: frekuensi trading yang tinggi cenderung muncul bersamaan "
+                "dengan kecenderungan menjual keuntungan terlalu cepat. "
+                "Pertimbangkan untuk mengurangi intensitas transaksi dan memberikan "
+                "lebih banyak waktu bagi posisi menguntungkan untuk berkembang."
+            )
+        else:
+            insights.append(
+                "Pola kompensasi terdeteksi: ketika frekuensi trading meningkat, "
+                "kamu justru cenderung menahan posisi menguntungkan lebih lama — "
+                "ini mengindikasikan kehati-hatian yang lebih besar saat aktif trading."
+            )
+
+    # OCS ↔ LAI: High trading activity co-occurs with reluctance to cut losses
+    if ocs_lai is not None and abs(ocs_lai) >= _INTERACTION_THRESHOLD:
+        if ocs_lai > 0:
+            insights.append(
+                "Pola menarik terdeteksi: semakin sering kamu bertransaksi, semakin "
+                "lama kamu menahan posisi yang merugi. Ini mengindikasikan bahwa "
+                "aktivitas trading yang tinggi mungkin dipengaruhi oleh keengganan "
+                "untuk merealisasi kerugian — kombinasi yang dapat menggerus modal "
+                "secara signifikan."
+            )
+        else:
+            insights.append(
+                "Pola kompensasi terdeteksi: sesi dengan aktivitas trading tinggi "
+                "justru disertai pengelolaan kerugian yang lebih disiplin. "
+                "Ini adalah tanda kesadaran diri yang berkembang."
+            )
+
+    # DEI ↔ LAI: Both biases reinforce each other — selling winners too fast
+    # AND holding losers too long amplifies portfolio damage
+    if dei_lai is not None and abs(dei_lai) >= _INTERACTION_THRESHOLD:
+        if dei_lai > 0:
+            insights.append(
+                "Dua pola bias yang saling memperkuat terdeteksi secara konsisten: "
+                "kamu cenderung menjual keuntungan terlalu cepat sekaligus menahan "
+                "kerugian terlalu lama. Kombinasi ini secara bersamaan memperbesar "
+                "kerugian dan memperkecil keuntungan — dampaknya terhadap portofolio "
+                "lebih besar dari kedua bias secara terpisah."
+            )
+        else:
+            insights.append(
+                "Pola kompensasi terdeteksi antara efek disposisi dan loss aversion: "
+                "keduanya tidak selalu muncul bersamaan dalam perilaku tradingmu, "
+                "menandakan pengendalian diri yang mulai berkembang pada salah satu dimensi."
+            )
+
+    return insights
 
 
 def generate_feedback(
