@@ -5,7 +5,9 @@ Computes pairwise Pearson correlation coefficients between OCS, |DEI|, and
 normalised LAI across recent sessions, capturing coupled behavioral patterns.
 
 Functions:
-    compute_interaction_scores — Returns a dict of pairwise correlations.
+    compute_interaction_scores    — Returns a dict of pairwise correlations.
+    build_interaction_heatmap_data — Returns Plotly-ready heatmap data for the
+                                     DEI × OCS interaction space.
 """
 
 from __future__ import annotations
@@ -93,3 +95,77 @@ def compute_interaction_scores(
         result["dei_lai"] if result["dei_lai"] is not None else float("nan"),
     )
     return result
+
+
+# ---------------------------------------------------------------------------
+# Heatmap data generator
+# ---------------------------------------------------------------------------
+
+_HEATMAP_GRID_N = 50  # Resolution of the background severity grid
+
+
+def build_interaction_heatmap_data(history: list) -> dict:
+    """Build Plotly-ready data for the DEI × OCS interaction heatmap.
+
+    The background grid encodes joint bias severity: the arithmetic mean of OCS
+    and |DEI| at each grid cell, producing a smooth diagonal gradient from the
+    low-risk (blue) corner to the high-risk (red) corner.
+
+    Args:
+        history: Sequence of objects with attributes
+                   ``session_number`` (int),
+                   ``cdt_overconfidence`` (float, OCS),
+                   ``cdt_disposition`` (float, DEI — sign is irrelevant here).
+                 Typically a list of serialised CdtSnapshot records ordered by
+                 ``session_number`` ascending.
+
+    Returns:
+        dict with keys:
+
+        * ``x``              — DEI axis grid values (list[float], 0–1)
+        * ``y``              — OCS axis grid values (list[float], 0–1)
+        * ``z``              — 2-D severity matrix (list[list[float]],
+                               shape ``len(y) × len(x)``), where
+                               ``z[i][j] = (y[i] + x[j]) / 2``
+        * ``scatter_x``      — user |DEI| per session (list[float])
+        * ``scatter_y``      — user OCS per session (list[float])
+        * ``scatter_labels`` — session number strings for text overlay
+        * ``scatter_text``   — hover tooltip strings per session
+    """
+    step = 1.0 / (_HEATMAP_GRID_N - 1)
+    dei_axis = [round(j * step, 6) for j in range(_HEATMAP_GRID_N)]
+    ocs_axis = [round(i * step, 6) for i in range(_HEATMAP_GRID_N)]
+
+    # z[i][j] = severity at OCS=ocs_axis[i], DEI=dei_axis[j]
+    z = [
+        [(ocs_axis[i] + dei_axis[j]) / 2.0 for j in range(_HEATMAP_GRID_N)]
+        for i in range(_HEATMAP_GRID_N)
+    ]
+
+    scatter_x: list[float] = []
+    scatter_y: list[float] = []
+    scatter_labels: list[str] = []
+    scatter_text: list[str] = []
+
+    for snap in history:
+        dei_val = abs(snap["cdt_disposition"])
+        ocs_val = snap["cdt_overconfidence"]
+        snum = snap["session_number"]
+        severity = (ocs_val + dei_val) / 2.0
+        scatter_x.append(dei_val)
+        scatter_y.append(ocs_val)
+        scatter_labels.append(str(snum))
+        scatter_text.append(
+            f"Sesi {snum}: DEI={dei_val:.3f}, OCS={ocs_val:.3f}, "
+            f"Interaksi={severity:.3f}"
+        )
+
+    return {
+        "x": dei_axis,
+        "y": ocs_axis,
+        "z": z,
+        "scatter_x": scatter_x,
+        "scatter_y": scatter_y,
+        "scatter_labels": scatter_labels,
+        "scatter_text": scatter_text,
+    }
