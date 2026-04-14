@@ -5,12 +5,15 @@ Critical test scenarios:
     - test_disposition_effect: sells all winners, holds all losers → DEI > 0.5
     - test_overconfidence:      14 trades + portfolio decline → OCS > 0.7
     - test_loss_aversion:       holds losers 3× longer → LAI > 2.0
+    - test_ci_*:                bootstrapped confidence-interval properties
 """
 
 import pytest
 
 from modules.analytics.bias_metrics import (
+    BiasMetricsWithCI,
     classify_severity,
+    compute_bias_metrics_with_ci,
     compute_disposition_effect,
     compute_loss_aversion_index,
     compute_overconfidence_score,
@@ -381,3 +384,113 @@ def test_overconfidence_catastrophic_loss_no_trades():
     )
     ocs = compute_overconfidence_score(features)
     assert ocs == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
+# Bootstrap confidence intervals
+# ---------------------------------------------------------------------------
+
+def _make_trades(n_winners: int, n_losers: int) -> list[dict]:
+    """Create realized-trade dicts: winners held 2 rounds, losers held 6 rounds."""
+    trades = []
+    for i in range(n_winners):
+        trades.append({
+            "stock_id": f"W{i}",
+            "buy_round": 1, "sell_round": 3,   # hold = 2
+            "buy_price": 100, "sell_price": 110, "quantity": 100,
+        })
+    for i in range(n_losers):
+        trades.append({
+            "stock_id": f"L{i}",
+            "buy_round": 1, "sell_round": 7,   # hold = 6
+            "buy_price": 100, "sell_price": 90, "quantity": 100,
+        })
+    return trades
+
+
+def test_ci_contains_point_estimate():
+    """For a session with 20 realized trades the bootstrapped 95% CI
+    must bracket the point estimate for all three metrics.
+
+    DEI: 10 winners, 10 losers, no open positions → DEI = 0.0.
+    LAI: winners held 2 rounds, losers 6 rounds → LAI = 3.0.
+    OCS: 20 buys + 20 sells, neutral performance → moderate OCS.
+
+    With a deterministic seed (Random(0)) and 500 replicates the
+    empirical 2.5th/97.5th percentiles reliably contain the point estimate.
+    """
+    features = make_features(
+        buy_count=20,
+        sell_count=20,
+        initial_value=10_000_000.0,
+        final_value=10_000_000.0,
+        realized_trades=_make_trades(10, 10),
+    )
+    result = compute_bias_metrics_with_ci(features, n_bootstrap=500)
+
+    assert result.dei_ci[0] <= result.dei <= result.dei_ci[1], (
+        f"DEI={result.dei:.4f} not in CI {result.dei_ci}"
+    )
+    assert result.ocs_ci[0] <= result.ocs <= result.ocs_ci[1], (
+        f"OCS={result.ocs:.4f} not in CI {result.ocs_ci}"
+    )
+    assert result.lai_ci[0] <= result.lai <= result.lai_ci[1], (
+        f"LAI={result.lai:.4f} not in CI {result.lai_ci}"
+    )
+
+
+def test_ci_degenerate_below_min_trades():
+    """When a session has fewer than 5 realized trades the CI must equal
+    (metric, metric) for every metric and low_confidence must be True.
+    """
+    features = make_features(
+        buy_count=3,
+        sell_count=3,
+        realized_trades=_make_trades(2, 1),   # 3 trades — below threshold
+    )
+    result = compute_bias_metrics_with_ci(features, n_bootstrap=500)
+
+    assert result.low_confidence is True
+    assert result.dei_ci == (result.dei, result.dei)
+    assert result.ocs_ci == (result.ocs, result.ocs)
+    assert result.lai_ci == (result.lai, result.lai)
+
+
+def test_ci_width_decreases_with_more_trades():
+    """CI width must shrink as the realized trade count grows.
+
+    Both DEI and LAI are computed directly from trade-level data, so the
+    bootstrap variance shrinks predictably with sample size.
+
+    5 trades  (3W + 2L): each bootstrap replicate can flip heavily between
+                         all-winner and all-loser outcomes → wide CI.
+    100 trades (50W + 50L): law of large numbers → outcomes are stable
+                             across replicates → narrow CI.
+    """
+    features_5 = make_features(
+        buy_count=5,
+        sell_count=5,
+        realized_trades=_make_trades(3, 2),
+    )
+    features_100 = make_features(
+        buy_count=100,
+        sell_count=100,
+        realized_trades=_make_trades(50, 50),
+    )
+
+    result_5 = compute_bias_metrics_with_ci(features_5, n_bootstrap=500)
+    result_100 = compute_bias_metrics_with_ci(features_100, n_bootstrap=500)
+
+    dei_width_5 = result_5.dei_ci[1] - result_5.dei_ci[0]
+    dei_width_100 = result_100.dei_ci[1] - result_100.dei_ci[0]
+    assert dei_width_100 < dei_width_5, (
+        f"DEI CI should be narrower with 100 trades: "
+        f"width_5={dei_width_5:.4f}, width_100={dei_width_100:.4f}"
+    )
+
+    lai_width_5 = result_5.lai_ci[1] - result_5.lai_ci[0]
+    lai_width_100 = result_100.lai_ci[1] - result_100.lai_ci[0]
+    assert lai_width_100 < lai_width_5, (
+        f"LAI CI should be narrower with 100 trades: "
+        f"width_5={lai_width_5:.4f}, width_100={lai_width_100:.4f}"
+    )
