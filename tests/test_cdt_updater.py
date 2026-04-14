@@ -14,9 +14,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from config import ALPHA, BETA
-from database.models import Base, BiasMetric, CognitiveProfile, User, StockCatalog
+from database.models import Base, BiasMetric, CdtSnapshot, CognitiveProfile, User, StockCatalog
 from modules.cdt.profile import get_or_create_profile
-from modules.cdt.stability import compute_stability_index
+from modules.cdt.stability import compute_learning_trajectory, compute_stability_index
 from modules.cdt.updater import update_profile
 
 
@@ -41,6 +41,30 @@ def user(db):
     db.add(u)
     db.flush()
     return u
+
+
+def _make_snapshot(
+    db,
+    user_id: int,
+    session_number: int,
+    ocs: float,
+    dei: float = 0.0,
+    lai: float = 0.0,
+) -> CdtSnapshot:
+    """Helper: create and persist a CdtSnapshot with given bias intensity values."""
+    snap = CdtSnapshot(
+        user_id=user_id,
+        session_id=str(uuid.uuid4()),
+        session_number=session_number,
+        cdt_overconfidence=ocs,
+        cdt_disposition=dei,
+        cdt_loss_aversion=lai,
+        cdt_risk_preference=0.0,
+        cdt_stability_index=0.5,
+    )
+    db.add(snap)
+    db.flush()
+    return snap
 
 
 def _make_metric(db, user_id: int, ocs: float, dei: float = 0.0, lai: float = 1.0) -> BiasMetric:
@@ -403,3 +427,83 @@ def test_stability_index_uses_normalized_dei(db, user):
     # But oscillating sign IS instability, so stability < 1.0
     assert si < 1.0, "Alternating DEI sign should not produce perfect stability"
     assert si > 0.5, "Moderate DEI sign-alternation should not produce si < 0.5"
+
+
+# ---------------------------------------------------------------------------
+# Learning trajectory (monotonicity check)
+# ---------------------------------------------------------------------------
+
+class TestLearningTrajectory:
+    """Tests for compute_learning_trajectory().
+
+    All cases set dei=0.0 and lai=0.0 so that OCS is always the dominant
+    bias (highest mean), making the trajectory selection deterministic.
+    """
+
+    def test_monotonically_decreasing_is_improving(self, db, user):
+        """5 sessions with strictly decreasing OCS → direction='improving'.
+
+        Values [0.9, 0.7, 0.5, 0.3, 0.1] are perfectly linear with
+        slope=-0.2 and r²=1.0, both well past the classification thresholds.
+        """
+        for i, ocs in enumerate([0.9, 0.7, 0.5, 0.3, 0.1]):
+            _make_snapshot(db, user.id, session_number=i + 1, ocs=ocs)
+
+        traj = compute_learning_trajectory(user.id, db)
+
+        assert traj.direction == "improving", (
+            f"Expected 'improving' for strictly decreasing OCS, got {traj.direction!r}"
+        )
+        assert traj.bias == "ocs"
+        assert traj.slope < -0.05
+        assert traj.r_squared > 0.4
+        assert traj.sessions_analyzed == 5
+        assert traj.interpretation  # non-empty string
+
+    def test_flat_sessions_are_stable(self, db, user):
+        """5 sessions with near-constant OCS (±0.02) → direction='stable'.
+
+        Values [0.50, 0.51, 0.49, 0.50, 0.52] yield slope≈0.003, well within
+        the ±0.05 stable band regardless of r².
+        """
+        for i, ocs in enumerate([0.50, 0.51, 0.49, 0.50, 0.52]):
+            _make_snapshot(db, user.id, session_number=i + 1, ocs=ocs)
+
+        traj = compute_learning_trajectory(user.id, db)
+
+        assert traj.direction == "stable", (
+            f"Expected 'stable' for flat OCS, got {traj.direction!r}"
+        )
+        assert traj.sessions_analyzed == 5
+
+    def test_two_sessions_is_insufficient_data(self, db, user):
+        """Only 2 sessions → direction='insufficient_data' (< 3 required)."""
+        for i, ocs in enumerate([0.8, 0.6]):
+            _make_snapshot(db, user.id, session_number=i + 1, ocs=ocs)
+
+        traj = compute_learning_trajectory(user.id, db)
+
+        assert traj.direction == "insufficient_data", (
+            f"Expected 'insufficient_data' for 2 sessions, got {traj.direction!r}"
+        )
+        assert traj.sessions_analyzed == 2
+        assert traj.slope == 0.0
+        assert traj.r_squared == 0.0
+
+    def test_noisy_upward_trend_is_worsening(self, db, user):
+        """5 sessions with noisy but clear upward trend → direction='worsening'.
+
+        Values [0.20, 0.40, 0.30, 0.60, 0.75] yield slope≈0.13 and r²≈0.89,
+        both past the worsening thresholds (>0.05 and >0.4 respectively).
+        """
+        for i, ocs in enumerate([0.20, 0.40, 0.30, 0.60, 0.75]):
+            _make_snapshot(db, user.id, session_number=i + 1, ocs=ocs)
+
+        traj = compute_learning_trajectory(user.id, db)
+
+        assert traj.direction == "worsening", (
+            f"Expected 'worsening' for noisy upward OCS, got {traj.direction!r}"
+        )
+        assert traj.slope > 0.05
+        assert traj.r_squared > 0.4
+        assert traj.sessions_analyzed == 5
