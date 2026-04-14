@@ -40,6 +40,11 @@ ENV/
 # Export outputs
 exports/
 
+# Generated reports (synthetic validation, ML outputs)
+reports/*.json
+reports/*.csv
+reports/*.png
+
 # pytest / coverage
 .pytest_cache/
 .coverage

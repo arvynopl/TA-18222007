@@ -518,7 +518,8 @@ def _page_profil() -> None:
         return
 
     from modules.utils.ui_helpers import (
-        apply_chart_theme, build_radar_chart, BIAS_NAMES, SEVERITY_COLORS,
+        apply_chart_theme, build_dual_radar_chart, build_radar_chart,
+        BIAS_NAMES, SEVERITY_COLORS,
     )
 
     # --- Summary metrics hero strip ---
@@ -573,9 +574,31 @@ def _page_profil() -> None:
 
     st.divider()
 
-    # --- Radar chart (shared themed component) ---
+    # --- Dual radar chart: current session vs. session average ---
+    if metrics_data:
+        from config import LAI_EMA_CEILING
+        latest = metrics_data[-1]
+        current_scores = {
+            "dei": latest["dei"],
+            "ocs": latest["ocs"],
+            "lai": latest["lai_norm"],
+        }
+        n = len(metrics_data)
+        avg_scores = {
+            "dei": sum(d["dei"] for d in metrics_data) / n,
+            "ocs": sum(d["ocs"] for d in metrics_data) / n,
+            "lai": sum(d["lai_norm"] for d in metrics_data) / n,
+        }
+        dual_radar = build_dual_radar_chart(current_scores, avg_scores)
+        st.plotly_chart(dual_radar, use_container_width=True)
+        st.caption(
+            "Grafik radar menampilkan profil bias sesi terakhir (biru) dibanding rata-rata "
+            "seluruh sesimu (oranye). Garis putus-putus = ambang batas perhatian (0.5)."
+        )
+
+    # --- CDT bias intensity vector radar (longitudinal EMA state) ---
     bv = profile_data["bias_vector"]
-    radar = build_radar_chart(bv, "Vektor Intensitas Bias (CDT)")
+    radar = build_radar_chart(bv, "Vektor Intensitas Bias (CDT — EMA)")
     st.plotly_chart(radar, use_container_width=True)
 
     # --- Session history line chart ---
