@@ -21,7 +21,7 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 from config import INITIAL_CAPITAL, ROUNDS_PER_SESSION
-from modules.utils.ui_helpers import apply_chart_theme, CHART_TEXT, COLOR_GAIN, COLOR_LOSS
+from modules.utils.ui_helpers import apply_chart_theme, CHART_TEXT, COLOR_GAIN, COLOR_LOSS, render_coach_mark_onboarding
 from database.connection import get_session
 from database.models import StockCatalog
 from modules.analytics.bias_metrics import compute_and_save_metrics
@@ -502,6 +502,10 @@ def render_simulation_page() -> None:
     user_id = st.session_state.get("user_id")
     if not user_id:
         st.warning("Silakan login terlebih dahulu di halaman Beranda.")
+        return
+
+    # Coach-mark onboarding — shown exactly once before the first simulation
+    if not render_coach_mark_onboarding():
         return
 
     init_simulation_session()
