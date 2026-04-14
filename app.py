@@ -22,7 +22,7 @@ from sqlalchemy.exc import IntegrityError
 
 from config import INITIAL_CAPITAL, validate_config
 from database.connection import get_session, init_db
-from database.models import BiasMetric, CognitiveProfile, User
+from database.models import BiasMetric, CdtSnapshot, CognitiveProfile, User
 from database.seed import run_seed
 from modules.feedback.renderer import render_feedback_page
 from modules.simulation.ui import render_simulation_page
@@ -483,6 +483,20 @@ def _page_profil() -> None:
             }
             for i, m in enumerate(past_metrics)
         ]
+        # Serialise CdtSnapshot history (used by the interaction heatmap)
+        snapshots_data = [
+            {
+                "session_number": s.session_number,
+                "cdt_overconfidence": s.cdt_overconfidence,
+                "cdt_disposition": s.cdt_disposition,
+            }
+            for s in (
+                sess.query(CdtSnapshot)
+                .filter_by(user_id=user_id)
+                .order_by(CdtSnapshot.session_number)
+                .all()
+            )
+        ]
         profile_data = None
         anomaly_data = None
         if profile:
@@ -643,6 +657,85 @@ def _page_profil() -> None:
                     f"💡 **{pair_names[strongest_pair]}** {direction} (r={val:+.2f}). "
                     f"Ini menunjukkan pola perilaku yang saling terkait pada profilmu."
                 )
+
+    # --- Peta Interaksi Bias (DEI × OCS heatmap) ---
+    st.subheader("🗺️ Peta Interaksi Bias")
+    st.caption(
+        "Visualisasi posisi biasmu dalam ruang interaksi DEI × OCS. "
+        "Zona merah menandakan risiko tinggi akibat kombinasi Overconfidence dan Efek Disposisi."
+    )
+    if len(snapshots_data) < 2:
+        st.info("Selesaikan minimal 2 sesi untuk melihat peta interaksi Anda.")
+    else:
+        from modules.cdt.interaction import build_interaction_heatmap_data
+
+        hm_data = build_interaction_heatmap_data(snapshots_data)
+
+        hm_fig = go.Figure()
+
+        # Background: joint severity heatmap (blue=low → orange=moderate → red=high)
+        hm_fig.add_trace(go.Heatmap(
+            x=hm_data["x"],
+            y=hm_data["y"],
+            z=hm_data["z"],
+            colorscale=[
+                [0.0, "#1a3a5c"],   # deep blue  – low risk
+                [0.5, "#F5A623"],   # amber      – moderate risk
+                [1.0, "#E8553A"],   # red-orange – high risk
+            ],
+            zmin=0.0,
+            zmax=1.0,
+            showscale=True,
+            colorbar=dict(
+                title=dict(text="Tingkat<br>Interaksi", font=dict(color="#E0E0E0", size=11)),
+                tickfont=dict(color="#E0E0E0"),
+                thickness=14,
+            ),
+            hovertemplate=(
+                "DEI: %{x:.2f}<br>OCS: %{y:.2f}<br>Interaksi: %{z:.2f}"
+                "<extra></extra>"
+            ),
+        ))
+
+        # User trajectory: numbered scatter points
+        hm_fig.add_trace(go.Scatter(
+            x=hm_data["scatter_x"],
+            y=hm_data["scatter_y"],
+            mode="markers+text",
+            marker=dict(
+                size=16,
+                color="white",
+                line=dict(color="#E8553A", width=2),
+                symbol="circle",
+            ),
+            text=hm_data["scatter_labels"],
+            textposition="top center",
+            textfont=dict(color="white", size=11, family="sans-serif"),
+            hovertext=hm_data["scatter_text"],
+            hoverinfo="text",
+            name="Sesi Anda",
+        ))
+
+        hm_fig.update_xaxes(
+            title_text="Skor DEI (Efek Disposisi)",
+            range=[0, 1],
+            gridcolor="#2a3a4a",
+            zeroline=False,
+        )
+        hm_fig.update_yaxes(
+            title_text="Skor OCS (Overconfidence)",
+            range=[0, 1],
+            gridcolor="#2a3a4a",
+            zeroline=False,
+        )
+        apply_chart_theme(hm_fig, height=460)
+        # Override legend placement — single-trace heatmap doesn't need a legend
+        hm_fig.update_layout(showlegend=False)
+        st.plotly_chart(hm_fig, use_container_width=True)
+        st.caption(
+            "Titik merah menunjukkan pola perdagangan berisiko tinggi "
+            "(Overconfident + Disposition Effect)"
+        )
 
     # --- ML Anomaly Detection Panel ---
     if anomaly_data:
