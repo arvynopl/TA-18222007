@@ -11,16 +11,19 @@ References:
         Econometrica, 47(2), 263–291.
 
 Public functions:
-    compute_disposition_effect   → (pgr, plr, dei)
-    compute_overconfidence_score → float
-    compute_loss_aversion_index  → float
-    classify_severity            → str
-    compute_and_save_metrics     → BiasMetric
+    compute_disposition_effect      → (pgr, plr, dei)
+    compute_overconfidence_score    → float
+    compute_loss_aversion_index     → float
+    classify_severity               → str
+    compute_bias_metrics_with_ci    → BiasMetricsWithCI
+    compute_and_save_metrics        → BiasMetric
 """
 
 from __future__ import annotations
 
 import math
+import random
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from statistics import mean, stdev
 
@@ -38,6 +41,40 @@ from config import (
 logger = logging.getLogger(__name__)
 from database.models import BiasMetric
 from modules.analytics.features import SessionFeatures, extract_session_features
+
+
+# ---------------------------------------------------------------------------
+# Result dataclass
+# ---------------------------------------------------------------------------
+
+@dataclass
+class BiasMetricsWithCI:
+    """Point estimates and bootstrapped 95% confidence intervals for all bias metrics.
+
+    Attributes:
+        dei:          Disposition Effect Index point estimate.
+        dei_ci:       (lower_95, upper_95) bootstrap CI for DEI.
+        ocs:          Overconfidence Score point estimate.
+        ocs_ci:       (lower_95, upper_95) bootstrap CI for OCS.
+        lai:          Loss Aversion Index point estimate.
+        lai_ci:       (lower_95, upper_95) bootstrap CI for LAI.
+        dei_severity: Severity label for DEI ("none"/"mild"/"moderate"/"severe").
+        ocs_severity: Severity label for OCS.
+        lai_severity: Severity label for LAI.
+        low_confidence: True when the session has fewer than 5 realized trades;
+                        all CIs degenerate to (metric, metric) in that case.
+    """
+
+    dei: float
+    dei_ci: tuple[float, float]
+    ocs: float
+    ocs_ci: tuple[float, float]
+    lai: float
+    lai_ci: tuple[float, float]
+    dei_severity: str
+    ocs_severity: str
+    lai_severity: str
+    low_confidence: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -243,6 +280,178 @@ def classify_severity(
     if mild_t is not None and value >= mild_t:
         return "mild"
     return "none"
+
+
+# ---------------------------------------------------------------------------
+# Bootstrapped confidence intervals
+# ---------------------------------------------------------------------------
+
+_MIN_TRADES_FOR_CI = 5  # minimum realized trades required for non-degenerate CIs
+
+
+def _percentile_ci(samples: list[float]) -> tuple[float, float]:
+    """Return the (2.5th, 97.5th) percentile of *samples* with linear interpolation.
+
+    Matches NumPy's default interpolation method so results are directly
+    comparable to scientific references.
+
+    Args:
+        samples: Bootstrap replicate values (need not be sorted).
+
+    Returns:
+        (lower_95, upper_95) tuple.
+    """
+    if not samples:
+        return 0.0, 0.0
+    n = len(samples)
+    sorted_s = sorted(samples)
+
+    def _p(pct: float) -> float:
+        idx = (pct / 100.0) * (n - 1)
+        lo = int(idx)
+        hi = min(lo + 1, n - 1)
+        frac = idx - lo
+        return sorted_s[lo] + frac * (sorted_s[hi] - sorted_s[lo])
+
+    return _p(2.5), _p(97.5)
+
+
+def _bootstrap_features(
+    features: SessionFeatures,
+    rng: random.Random,
+) -> SessionFeatures:
+    """Return one bootstrap replicate of *features* by resampling trade-level data.
+
+    Resamples ``realized_trades`` and ``open_positions`` independently with
+    replacement, keeping the same sample sizes.  OCS-relevant aggregate counts
+    (``buy_count``, ``sell_count``) and ``final_value`` are re-derived from the
+    resampled trade data so every metric receives internally consistent inputs.
+
+    Note: ``buy_count`` and ``sell_count`` are approximated as one action per
+    completed round-trip and one buy per open position — a deliberate
+    simplification that preserves the bootstrap's uncertainty signal for OCS
+    while avoiding unbounded inflation from raw action counts.
+
+    Args:
+        features: Original session features.
+        rng:      Caller-owned Random instance (keeps global state untouched).
+
+    Returns:
+        A new SessionFeatures populated with the resampled data.
+    """
+    n_realized = len(features.realized_trades)
+    n_open = len(features.open_positions)
+
+    rt_b = rng.choices(features.realized_trades, k=n_realized) if n_realized > 0 else []
+    op_b = rng.choices(features.open_positions, k=n_open) if n_open > 0 else []
+
+    f_b = SessionFeatures(user_id=features.user_id, session_id=features.session_id)
+    f_b.realized_trades = rt_b
+    f_b.open_positions = op_b
+    f_b.initial_value = features.initial_value
+
+    # Each completed round-trip counts as one buy + one sell action;
+    # each open position counts as one buy action (no matching sell yet).
+    f_b.buy_count = n_realized + n_open
+    f_b.sell_count = n_realized
+
+    # Approximate final portfolio value from resampled P&L contributions.
+    realized_pnl = sum(
+        (t["sell_price"] - t["buy_price"]) * t["quantity"] for t in rt_b
+    )
+    unrealized_pnl = sum(p.get("unrealized_pnl", 0.0) for p in op_b)
+    f_b.final_value = max(features.initial_value + realized_pnl + unrealized_pnl, 1.0)
+
+    return f_b
+
+
+def compute_bias_metrics_with_ci(
+    session_features: SessionFeatures,
+    n_bootstrap: int = 500,
+) -> BiasMetricsWithCI:
+    """Compute all three bias metrics with bootstrapped 95% confidence intervals.
+
+    Resamples the underlying trade-level data (``realized_trades``,
+    ``open_positions``) *n_bootstrap* times with replacement, recomputes each
+    metric per replicate, and reports the 2.5th and 97.5th percentiles as the
+    95% CI.
+
+    When the session has fewer than ``_MIN_TRADES_FOR_CI`` (5) realized trades,
+    the bootstrap is skipped: all three CIs degenerate to ``(metric, metric)``
+    and ``low_confidence`` is set to ``True``.
+
+    The internal RNG is seeded deterministically so repeated calls with the
+    same inputs always return the same CIs.
+
+    Args:
+        session_features: Extracted session features.
+        n_bootstrap:      Number of bootstrap replicates (default 500).
+
+    Returns:
+        :class:`BiasMetricsWithCI` with point estimates, 95% CIs, severity
+        labels, and a ``low_confidence`` flag.
+    """
+    _, _, dei = compute_disposition_effect(session_features)
+    ocs = compute_overconfidence_score(session_features)
+    lai = compute_loss_aversion_index(session_features)
+
+    dei_severity = classify_severity(abs(dei), DEI_SEVERE, DEI_MODERATE, DEI_MILD)
+    ocs_severity = classify_severity(ocs, OCS_SEVERE, OCS_MODERATE, OCS_MILD)
+    lai_severity = classify_severity(lai, LAI_SEVERE, LAI_MODERATE, LAI_MILD)
+
+    n_realized = len(session_features.realized_trades)
+    if n_realized < _MIN_TRADES_FOR_CI:
+        logger.debug(
+            "compute_bias_metrics_with_ci: user=%s session=%s — only %d realized trades, "
+            "CI degenerated to point estimate (low_confidence=True)",
+            session_features.user_id, session_features.session_id, n_realized,
+        )
+        return BiasMetricsWithCI(
+            dei=dei, dei_ci=(dei, dei),
+            ocs=ocs, ocs_ci=(ocs, ocs),
+            lai=lai, lai_ci=(lai, lai),
+            dei_severity=dei_severity,
+            ocs_severity=ocs_severity,
+            lai_severity=lai_severity,
+            low_confidence=True,
+        )
+
+    rng = random.Random(0)
+    dei_samples: list[float] = []
+    ocs_samples: list[float] = []
+    lai_samples: list[float] = []
+
+    for _ in range(n_bootstrap):
+        f_b = _bootstrap_features(session_features, rng)
+        _, _, dei_b = compute_disposition_effect(f_b)
+        ocs_b = compute_overconfidence_score(f_b)
+        lai_b = compute_loss_aversion_index(f_b)
+        dei_samples.append(dei_b)
+        ocs_samples.append(ocs_b)
+        lai_samples.append(lai_b)
+
+    dei_ci = _percentile_ci(dei_samples)
+    ocs_ci = _percentile_ci(ocs_samples)
+    lai_ci = _percentile_ci(lai_samples)
+
+    logger.debug(
+        "compute_bias_metrics_with_ci: user=%s session=%s n_bootstrap=%d "
+        "DEI=%.3f CI=[%.3f, %.3f] OCS=%.3f CI=[%.3f, %.3f] LAI=%.3f CI=[%.3f, %.3f]",
+        session_features.user_id, session_features.session_id, n_bootstrap,
+        dei, dei_ci[0], dei_ci[1],
+        ocs, ocs_ci[0], ocs_ci[1],
+        lai, lai_ci[0], lai_ci[1],
+    )
+
+    return BiasMetricsWithCI(
+        dei=dei, dei_ci=dei_ci,
+        ocs=ocs, ocs_ci=ocs_ci,
+        lai=lai, lai_ci=lai_ci,
+        dei_severity=dei_severity,
+        ocs_severity=ocs_severity,
+        lai_severity=lai_severity,
+        low_confidence=False,
+    )
 
 
 # ---------------------------------------------------------------------------
