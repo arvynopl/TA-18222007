@@ -195,6 +195,109 @@ def build_radar_chart(values: dict, title: str = "Profil Bias") -> go.Figure:
     return fig
 
 
+def build_dual_radar_chart(
+    current_scores: dict,
+    avg_scores: dict,
+) -> go.Figure:
+    """Build a dual-trace radar/spider chart: current session vs. session average.
+
+    Args:
+        current_scores: {"dei": float, "ocs": float, "lai": float}  — normalized 0–1.
+        avg_scores:     {"dei": float, "ocs": float, "lai": float}  — normalized 0–1.
+
+    Returns:
+        Plotly Figure with two traces plus a dotted 0.5 reference circle.
+    """
+    categories = [
+        "Disposition Effect (DEI)",
+        "Overconfidence (OCS)",
+        "Loss Aversion (LAI)",
+    ]
+    current_vals = [
+        current_scores.get("dei", 0.0),
+        current_scores.get("ocs", 0.0),
+        current_scores.get("lai", 0.0),
+    ]
+    avg_vals = [
+        avg_scores.get("dei", 0.0),
+        avg_scores.get("ocs", 0.0),
+        avg_scores.get("lai", 0.0),
+    ]
+    # Close the polygons
+    cats_closed = categories + [categories[0]]
+    current_closed = current_vals + [current_vals[0]]
+    avg_closed = avg_vals + [avg_vals[0]]
+    ref_closed = [0.5, 0.5, 0.5, 0.5]  # reference circle at 0.5
+
+    fig = go.Figure()
+
+    # Dotted reference circle at 0.5 ("Ambang Batas Perhatian")
+    fig.add_trace(go.Scatterpolar(
+        r=ref_closed,
+        theta=cats_closed,
+        mode="lines",
+        line=dict(color="rgba(255,255,255,0.30)", width=1, dash="dot"),
+        name="Ambang Batas Perhatian",
+        showlegend=True,
+    ))
+
+    # Session average trace (dashed orange)
+    fig.add_trace(go.Scatterpolar(
+        r=avg_closed,
+        theta=cats_closed,
+        mode="lines+markers",
+        line=dict(color="#F5A623", width=2, dash="dash"),
+        marker=dict(size=6, color="#F5A623"),
+        name="Rata-rata Anda",
+        showlegend=True,
+    ))
+
+    # Current session trace (solid blue, semi-transparent fill)
+    fig.add_trace(go.Scatterpolar(
+        r=current_closed,
+        theta=cats_closed,
+        fill="toself",
+        fillcolor="rgba(74, 144, 226, 0.20)",
+        line=dict(color=COLOR_ACCENT, width=2),
+        marker=dict(size=7, color=COLOR_ACCENT),
+        name="Sesi Ini",
+        showlegend=True,
+    ))
+
+    fig.update_layout(
+        polar=dict(
+            radialaxis=dict(
+                visible=True,
+                range=[0, 1],
+                gridcolor="rgba(255,255,255,0.10)",
+                tickfont=dict(size=10, color=CHART_TEXT),
+            ),
+            angularaxis=dict(
+                tickfont=dict(size=12, color="white"),
+                gridcolor="rgba(255,255,255,0.10)",
+            ),
+            bgcolor=CHART_BG,
+        ),
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=-0.28,
+            xanchor="center",
+            x=0.5,
+            font=dict(size=11, color=CHART_TEXT),
+        ),
+        title=dict(
+            text="Radar Bias: Sesi Ini vs. Rata-rata",
+            font=dict(size=16, color="white"),
+        ),
+        height=420,
+        margin=dict(l=60, r=60, t=70, b=70),
+        paper_bgcolor=CHART_BG,
+    )
+    return fig
+
+
 # ---------------------------------------------------------------------------
 # Custom CSS Injection
 # ---------------------------------------------------------------------------

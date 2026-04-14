@@ -122,6 +122,86 @@ def compute_counterfactual(
 
 _SEVERITY_RANK: dict[str, int] = {"none": 0, "mild": 1, "moderate": 2, "severe": 3}
 
+
+def generate_tldr_summary(bias_results: dict) -> str:
+    """Generate a 1–2 sentence plain-language TL;DR summary in Bahasa Indonesia.
+
+    Args:
+        bias_results: Dict with keys "dei", "ocs", "lai", each a (score, severity) tuple.
+                      E.g. {"dei": (0.65, "severe"), "ocs": (0.15, "none"), "lai": (1.1, "none")}
+
+    Returns:
+        A Bahasa Indonesia summary string (may contain Markdown bold via **...**).
+    """
+    # All none → encouragement
+    if all(sv == "none" for _, sv in bias_results.values()):
+        return (
+            "Dalam sesi ini, Anda tidak menunjukkan pola bias perilaku yang signifikan. "
+            "Terus pertahankan pendekatan yang disiplin."
+        )
+
+    # Find dominant bias: highest severity rank, then highest score as tiebreaker
+    best_key = max(
+        ["dei", "ocs", "lai"],
+        key=lambda k: (_SEVERITY_RANK.get(bias_results[k][1], 0), bias_results[k][0]),
+    )
+    _, severity = bias_results[best_key]
+
+    _SUMMARIES: dict[str, dict[str, str]] = {
+        "dei": {
+            "mild": (
+                "Pola **efek disposisi ringan** terdeteksi: Anda cenderung menjual saham "
+                "yang untung sedikit lebih cepat dari optimal. "
+                "Perhatikan timing penjualan di sesi berikutnya."
+            ),
+            "moderate": (
+                "Dalam sesi ini, kecenderungan **efek disposisi Anda berada di tingkat sedang** "
+                "— Anda cenderung menjual saham yang untung terlalu cepat dan menahan yang rugi "
+                "terlalu lama. Coba terapkan aturan stop-loss yang konsisten di sesi berikutnya."
+            ),
+            "severe": (
+                "Dalam sesi ini, kecenderungan **efek disposisi Anda berada di tingkat berat** "
+                "— Anda menjual saham yang untung terlalu cepat dan menahan yang rugi terlalu "
+                "lama secara signifikan. Terapkan aturan stop-loss yang ketat dan target profit "
+                "yang jelas sebelum memulai transaksi."
+            ),
+        },
+        "ocs": {
+            "mild": (
+                "Pola **overconfidence ringan** terdeteksi: frekuensi transaksi Anda lebih "
+                "tinggi dari rata-rata tanpa peningkatan performa proporsional."
+            ),
+            "moderate": (
+                "Pola **overconfidence sedang** terdeteksi: frekuensi transaksi Anda lebih "
+                "tinggi dari rata-rata tanpa peningkatan performa proporsional. "
+                "Pertimbangkan untuk mengurangi jumlah transaksi dan fokus pada kualitas keputusan."
+            ),
+            "severe": (
+                "Pola **overconfidence berat** terdeteksi: Anda bertransaksi terlalu sering "
+                "dengan hasil di bawah rata-rata pasar. Kurangi intensitas transaksi dan "
+                "evaluasi setiap keputusan secara lebih kritis."
+            ),
+        },
+        "lai": {
+            "mild": (
+                "Pola **loss aversion ringan** terdeteksi: Anda cenderung menahan posisi "
+                "merugi sedikit lebih lama dari yang optimal."
+            ),
+            "moderate": (
+                "Dalam sesi ini, **loss aversion Anda berada di tingkat sedang** — Anda "
+                "menahan posisi yang merugi secara tidak proporsional dibanding posisi untung. "
+                "Coba tetapkan batas kerugian maksimum sebelum membuka posisi."
+            ),
+            "severe": (
+                "Dalam sesi ini, **loss aversion Anda berada di tingkat berat** — Anda menahan "
+                "posisi merugi jauh lebih lama dari posisi untung. Terapkan disiplin cut-loss "
+                "yang konsisten untuk melindungi modal Anda."
+            ),
+        },
+    }
+
+    return _SUMMARIES[best_key][severity]
+
 _INTERACTION_THRESHOLD = 0.65  # Strong coupling threshold (Cohen 1988)
 _MIN_SESSIONS_FOR_INTERACTION = 5
 

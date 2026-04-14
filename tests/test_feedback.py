@@ -16,7 +16,7 @@ from sqlalchemy.orm import sessionmaker
 from database.models import Base, BiasMetric, CognitiveProfile, FeedbackHistory, User
 from modules.analytics.bias_metrics import classify_severity
 from modules.cdt.profile import get_or_create_profile
-from modules.feedback.generator import generate_feedback, get_session_feedback
+from modules.feedback.generator import generate_feedback, generate_tldr_summary, get_session_feedback
 from modules.feedback.templates import TEMPLATES
 
 
@@ -239,6 +239,52 @@ def test_generate_feedback_with_null_metrics(db, user):
             assert "{" not in fb.explanation_text, (
                 f"Unfilled placeholder in {fb.bias_type}: {fb.explanation_text}"
             )
+
+
+# ---------------------------------------------------------------------------
+# generate_tldr_summary tests
+# ---------------------------------------------------------------------------
+
+def test_tldr_all_none_returns_encouragement():
+    """All severities = 'none' → returns the no-bias encouragement string."""
+    result = generate_tldr_summary({
+        "dei": (0.0, "none"),
+        "ocs": (0.0, "none"),
+        "lai": (0.0, "none"),
+    })
+    assert "tidak menunjukkan pola bias" in result
+    assert "disiplin" in result
+
+
+def test_tldr_one_severe_bias_mentions_bias_name():
+    """One severe bias (OCS) → summary mentions overconfidence."""
+    result = generate_tldr_summary({
+        "dei": (0.0, "none"),
+        "ocs": (0.85, "severe"),
+        "lai": (0.0, "none"),
+    })
+    assert "overconfidence" in result.lower()
+    # Should not contain 'tidak menunjukkan' (encouragement phrase)
+    assert "tidak menunjukkan" not in result
+
+
+def test_tldr_two_moderate_biases_picks_higher_score():
+    """Two moderate biases → dominant is the one with higher score."""
+    # DEI moderate with high score, OCS moderate with lower score
+    result_dei_dominant = generate_tldr_summary({
+        "dei": (0.45, "moderate"),   # higher score → dominant
+        "ocs": (0.25, "moderate"),
+        "lai": (0.0, "none"),
+    })
+    assert "efek disposisi" in result_dei_dominant.lower() or "disposition" in result_dei_dominant.lower()
+
+    # OCS moderate with high score, DEI moderate with lower score
+    result_ocs_dominant = generate_tldr_summary({
+        "dei": (0.20, "moderate"),
+        "ocs": (0.45, "moderate"),   # higher score → dominant
+        "lai": (0.0, "none"),
+    })
+    assert "overconfidence" in result_ocs_dominant.lower()
 
 
 def test_generate_feedback_null_dei_not_severe(db, user):
