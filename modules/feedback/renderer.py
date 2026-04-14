@@ -19,7 +19,11 @@ from config import (
 from database.connection import get_session
 from database.models import BiasMetric
 from modules.analytics.bias_metrics import classify_severity
-from modules.feedback.generator import get_longitudinal_summary, get_session_feedback
+from modules.feedback.generator import (
+    generate_tldr_summary,
+    get_longitudinal_summary,
+    get_session_feedback,
+)
 from modules.utils.ui_helpers import (
     BIAS_DESCRIPTIONS,
     BIAS_NAMES,
@@ -232,6 +236,87 @@ def render_interaction_synthesis(user_id: int, session_id: str) -> None:
         st.info(insight)
 
 
+_PILL_SEVERITY_LABEL = {
+    "none": "Tidak Ada",
+    "mild": "Ringan",
+    "moderate": "Sedang",
+    "severe": "Berat",
+}
+
+_PILL_SEVERITY_COLOR = {
+    "none": ("#52C41A", "rgba(82,196,26,0.15)"),
+    "mild": ("#4A90E2", "rgba(74,144,226,0.15)"),
+    "moderate": ("#F5A623", "rgba(245,166,35,0.15)"),
+    "severe": ("#E8553A", "rgba(232,85,58,0.15)"),
+}
+
+_BIAS_SHORT_KEY = {
+    "disposition_effect": "dei",
+    "overconfidence": "ocs",
+    "loss_aversion": "lai",
+}
+
+
+def _render_tldr_card(feedbacks: list[dict], metric_data: dict) -> None:
+    """Render the amber TL;DR summary card at the top of the feedback page.
+
+    Args:
+        feedbacks:   Serialised FeedbackHistory dicts for the current session.
+        metric_data: Dict with keys "ocs", "dei", "lai" (float scores).
+    """
+    # Build bias_results for generate_tldr_summary
+    bias_results: dict[str, tuple[float, str]] = {}
+    for fb in feedbacks:
+        short = _BIAS_SHORT_KEY.get(fb["bias_type"])
+        if short:
+            bias_results[short] = (metric_data[short], fb["severity"])
+
+    # Ensure all three keys present (graceful fallback)
+    for k in ("dei", "ocs", "lai"):
+        bias_results.setdefault(k, (0.0, "none"))
+
+    tldr_text = generate_tldr_summary(bias_results)
+
+    st.markdown(
+        """
+        <div style="
+            background: rgba(245, 166, 35, 0.12);
+            border: 1px solid rgba(245, 166, 35, 0.45);
+            border-radius: 10px;
+            padding: 18px 22px;
+            margin-bottom: 8px;
+        ">
+            <div style="font-size: 16px; font-weight: 700; color: #F5A623; margin-bottom: 10px;">
+                📋 Ringkasan Sesi Ini
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # TL;DR text rendered as markdown so **bold** works
+    st.markdown(tldr_text)
+
+    # Pill badges
+    pill_cols = st.columns(3)
+    pill_labels = [
+        ("DEI", bias_results["dei"][1]),
+        ("OCS", bias_results["ocs"][1]),
+        ("LAI", bias_results["lai"][1]),
+    ]
+    for col, (badge_key, sev) in zip(pill_cols, pill_labels):
+        color, bg = _PILL_SEVERITY_COLOR.get(sev, ("#78909c", "rgba(120,144,156,0.15)"))
+        label = _PILL_SEVERITY_LABEL.get(sev, sev.capitalize())
+        col.markdown(
+            f"<div style='"
+            f"display:inline-block; padding:4px 14px; border-radius:20px; "
+            f"background:{bg}; border:1px solid {color}44; "
+            f"color:{color}; font-size:13px; font-weight:600;'>"
+            f"{badge_key}: {label}</div>",
+            unsafe_allow_html=True,
+        )
+
+
 def render_feedback_page(user_id: int, session_id: str) -> None:
     """Render the complete post-session feedback page.
 
@@ -269,6 +354,11 @@ def render_feedback_page(user_id: int, session_id: str) -> None:
     if not feedbacks:
         st.warning("Belum ada data umpan balik untuk sesi ini.")
         return
+
+    # --- TL;DR Summary Card ---
+    _render_tldr_card(feedbacks, metric_data)
+
+    st.divider()
 
     # --- Gauge summary strip ---
     g1, g2, g3 = st.columns(3)
@@ -327,6 +417,8 @@ def render_feedback_page(user_id: int, session_id: str) -> None:
 
     render_interaction_synthesis(user_id=user_id, session_id=session_id)
 
+    render_stated_vs_revealed(user_id)
+
     # --- Session navigation CTAs ---
     st.divider()
     col_new, col_profile = st.columns(2)
@@ -341,6 +433,89 @@ def render_feedback_page(user_id: int, session_id: str) -> None:
 
     # --- Post-Session Self-Assessment Survey ---
     _render_post_session_survey(user_id=user_id, session_id=session_id)
+
+
+def render_stated_vs_revealed(user_id: int) -> None:
+    """Render the Stated vs. Revealed Behavior comparison panel.
+
+    Shows a color-coded 3-row table comparing what the user reported in their
+    pre-simulation survey against what was detected by the bias engine.
+    Only displayed when the user has a UserSurvey record.
+
+    Args:
+        user_id: ID of the user.
+    """
+    from modules.analytics.comparison import build_stated_vs_revealed
+
+    with get_session() as sess:
+        report = build_stated_vs_revealed(user_id, sess)
+
+    if not report.has_survey:
+        st.markdown("---")
+        st.info(
+            "📝 **Isi survei awal untuk melihat perbandingan pernyataan vs. perilaku Anda di sini.**\n\n"
+            "Survei singkat ini memungkinkan sistem membandingkan apa yang Anda nyatakan "
+            "tentang kebiasaan trading Anda dengan pola perilaku yang terdeteksi dari simulasi."
+        )
+        return
+
+    st.markdown("---")
+    st.subheader("🔍 Perbandingan: Pernyataan vs. Perilaku")
+    st.caption(
+        "Tabel berikut membandingkan apa yang Anda nyatakan dalam survei awal "
+        "dengan perilaku aktual yang terdeteksi dari sesi simulasi terbaru."
+    )
+
+    _LEVEL_ID = {"low": "Rendah", "medium": "Sedang", "high": "Tinggi"}
+    _DISC_COLOR = {
+        "aligned": "#52C41A",
+        "underestimates_bias": "#E8553A",
+        "overestimates_discipline": "#F5A623",
+        "unable_to_compare": "#78909c",
+    }
+    _DISC_LABEL = {
+        "aligned": "✅ Sesuai",
+        "underestimates_bias": "🔴 Meremehkan Bias",
+        "overestimates_discipline": "🟠 Melebihkan Bias",
+        "unable_to_compare": "— Tidak Dapat Dibandingkan",
+    }
+
+    # Header row
+    h1, h2, h3, h4 = st.columns([2, 1.5, 1.5, 2])
+    h1.markdown("**Bias**")
+    h2.markdown("**Yang Anda Nyatakan**")
+    h3.markdown("**Yang Terdeteksi**")
+    h4.markdown("**Kesenjangan**")
+    st.markdown("<hr style='margin:4px 0; border-color:rgba(255,255,255,0.1);'>", unsafe_allow_html=True)
+
+    narratives: list[str] = []
+    for comp in report.comparisons:
+        c1, c2, c3, c4 = st.columns([2, 1.5, 1.5, 2])
+        color = _DISC_COLOR.get(comp.discrepancy, "#78909c")
+        disc_label = _DISC_LABEL.get(comp.discrepancy, comp.discrepancy)
+        c1.markdown(f"**{comp.bias_name}**")
+        c2.markdown(_LEVEL_ID.get(comp.stated_level, comp.stated_level))
+        c3.markdown(_LEVEL_ID.get(comp.revealed_level, comp.revealed_level))
+        c4.markdown(
+            f"<span style='color:{color}; font-weight:600;'>{disc_label}</span>",
+            unsafe_allow_html=True,
+        )
+        if comp.interpretation_id:
+            narratives.append(comp.interpretation_id)
+
+    # Synthesis paragraph
+    if narratives:
+        st.markdown("---")
+        synthesis = " ".join(narratives)
+        if report.overall_alignment == "discrepant":
+            st.warning(
+                "**Perhatian:** Terdapat kesenjangan antara persepsi diri Anda dan perilaku "
+                f"yang terdeteksi. {synthesis}"
+            )
+        else:
+            st.info(
+                f"**Ringkasan:** {synthesis}"
+            )
 
 
 def _render_post_session_survey(user_id: int, session_id: str) -> None:
