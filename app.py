@@ -72,6 +72,7 @@ def _init_session_state() -> None:
         "last_session_id": None,
         "consent_given": False,
         "show_survey": False,
+        "onboarding_shown": False,
     }
     for k, v in defaults.items():
         if k not in st.session_state:

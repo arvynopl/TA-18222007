@@ -277,3 +277,144 @@ def inject_custom_css() -> None:
     }
     </style>
     """, unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------------------
+# Coach-Mark Onboarding (first session only)
+# ---------------------------------------------------------------------------
+
+def render_coach_mark_onboarding() -> bool:
+    """Render a 3-step coach-mark onboarding sequence, shown on first session only.
+
+    Call this at the top of the simulation page before any other simulation UI.
+    The sequence is gated on st.session_state["onboarding_shown"]: once the user
+    clicks "Mulai Simulasi" on step 3, that flag is set to True and is never shown
+    again.
+
+    Returns:
+        True  — onboarding is already done (or just completed); caller may proceed.
+        False — onboarding step is being displayed; caller should return immediately.
+    """
+    if st.session_state.get("onboarding_shown", False):
+        return True
+
+    step: int = st.session_state.get("onboarding_step", 1)
+
+    _STEPS = [
+        {
+            "title": "Cara Membaca Grafik",
+            "body": (
+                "Grafik menampilkan harga historis saham selama 14 hari. "
+                "Garis biru = MA5, garis merah = MA20. "
+                "Anda tidak perlu menganalisis grafik secara teknis — "
+                "cukup putuskan berdasarkan intuisi Anda."
+            ),
+            "btn": "Lanjut →",
+        },
+        {
+            "title": "Cara Melakukan Transaksi",
+            "body": (
+                "Gunakan tombol Beli / Jual di bawah setiap saham. "
+                "Anda dapat memilih berapa saham yang ingin dibeli. "
+                "Tidak semua saham harus diperdagangkan."
+            ),
+            "btn": "Lanjut →",
+        },
+        {
+            "title": "Tentang Simulasi Ini",
+            "body": (
+                "Simulasi ini menggunakan data harga saham IDX historis nyata. "
+                "Tujuannya bukan untuk menguji kemampuan analisis Anda, "
+                "melainkan untuk memahami pola pengambilan keputusan Anda secara alami."
+            ),
+            "btn": "Mulai Simulasi ✓",
+        },
+    ]
+
+    n_steps = len(_STEPS)
+    current = _STEPS[step - 1]
+
+    # CSS — prefixed with cdt-coach- to avoid collisions with other page styles
+    st.markdown("""
+    <style>
+    .cdt-coach-card {
+        background: rgba(74, 144, 226, 0.06);
+        border: 1px solid rgba(74, 144, 226, 0.30);
+        border-radius: 14px;
+        padding: 32px 36px;
+        margin: 16px 0 20px 0;
+    }
+    .cdt-coach-stepper {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 1.8px;
+        text-transform: uppercase;
+        color: #4A90E2;
+        margin-bottom: 8px;
+    }
+    .cdt-coach-title {
+        font-size: 21px;
+        font-weight: 700;
+        color: #FFFFFF;
+        margin-bottom: 14px;
+    }
+    .cdt-coach-body {
+        font-size: 15px;
+        color: #B0BEC5;
+        line-height: 1.75;
+    }
+    .cdt-coach-dots {
+        display: flex;
+        gap: 8px;
+        margin-top: 24px;
+    }
+    .cdt-coach-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: rgba(74, 144, 226, 0.25);
+        display: inline-block;
+    }
+    .cdt-coach-dot-on {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #4A90E2;
+        display: inline-block;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # Progress dots: active step uses cdt-coach-dot-on, others use cdt-coach-dot
+    dots_html = "".join(
+        f'<span class="cdt-coach-dot{"-on" if i + 1 == step else ""}"></span>'
+        for i in range(n_steps)
+    )
+
+    st.markdown(f"""
+    <div class="cdt-coach-card">
+        <div class="cdt-coach-stepper">LANGKAH {step} DARI {n_steps}</div>
+        <div class="cdt-coach-title">{current["title"]}</div>
+        <div class="cdt-coach-body">{current["body"]}</div>
+        <div class="cdt-coach-dots">{dots_html}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Button right-aligned via columns
+    _, btn_col = st.columns([2, 1])
+    with btn_col:
+        if st.button(
+            current["btn"],
+            type="primary",
+            use_container_width=True,
+            key=f"cdt_coach_btn_{step}",
+        ):
+            if step < n_steps:
+                st.session_state["onboarding_step"] = step + 1
+            else:
+                # Final step — mark onboarding complete
+                st.session_state["onboarding_shown"] = True
+                st.session_state.pop("onboarding_step", None)
+            st.rerun()
+
+    return False
