@@ -1,0 +1,34 @@
+{
+  "generated_at": "2026-04-14T05:05:54.236662+00:00",
+  "model": "DecisionTreeClassifier(max_depth=4, criterion='gini', class_weight='balanced', min_samples_leaf=2, random_state=42)",
+  "overall_accuracy": 0.975,
+  "n_training_samples": 40,
+  "n_db_records": 0,
+  "used_synthetic_data": true,
+  "synthetic_personas": [
+    "Investor Seimbang",
+    "Trader Overconfident",
+    "Investor Efek Disposisi",
+    "Investor Aversi Kerugian",
+    "Investor Multi-Bias"
+  ],
+  "class_counts": {
+    "none": 6,
+    "moderate": 18,
+    "severe": 14,
+    "mild": 2
+  },
+  "feature_names": [
+    "ocs",
+    "abs_dei",
+    "lai_norm",
+    "pgr",
+    "plr",
+    "trade_frequency",
+    "hold_ratio",
+    "portfolio_return_pct",
+    "realized_count_norm",
+    "ocs_x_lai"
+  ],
+  "notes": "Akurasi dihitung pada data latih (in-sample). Untuk evaluasi generalisasi, lihat laporan klasifikasi per-kelas (CSV). Data sintetis ditambahkan karena hanya ada 0 rekaman di database (minimum diperlukan: 20)."
+}
