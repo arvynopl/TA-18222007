@@ -62,6 +62,7 @@ def _apply_schema_migrations(engine: Engine) -> None:
 def init_db() -> None:
     """Create all tables defined in models.py (no-op if they already exist)."""
     engine = get_engine()
+    # For existing dev DBs with new columns added to BiasMetric, re-run `python -m database.seed` to apply create_all.
     Base.metadata.create_all(bind=engine)
     _apply_schema_migrations(engine)
 
