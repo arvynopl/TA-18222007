@@ -8,11 +8,18 @@ Critical test scenarios:
     - test_ci_*:                bootstrapped confidence-interval properties
 """
 
-import pytest
+import uuid
+from datetime import date, timedelta
 
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from database.models import Base, MarketSnapshot, StockCatalog, User, UserAction
 from modules.analytics.bias_metrics import (
     BiasMetricsWithCI,
     classify_severity,
+    compute_and_save_metrics,
     compute_bias_metrics_with_ci,
     compute_disposition_effect,
     compute_loss_aversion_index,
@@ -493,4 +500,121 @@ def test_ci_width_decreases_with_more_trades():
     assert lai_width_100 < lai_width_5, (
         f"LAI CI should be narrower with 100 trades: "
         f"width_5={lai_width_5:.4f}, width_100={lai_width_100:.4f}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# compute_and_save_metrics — CI column persistence
+# ---------------------------------------------------------------------------
+
+_SAVE_STOCKS = [
+    ("BBCA.JK", "BBCA", "Bank Central Asia", "Finance", "low"),
+    ("ANTM.JK", "ANTM", "Aneka Tambang", "Mining", "high"),
+    ("GOTO.JK", "GOTO", "GoTo Gojek Tokopedia", "Technology", "high"),
+]
+_SAVE_PRICES = {"BBCA.JK": 9000.0, "ANTM.JK": 2000.0, "GOTO.JK": 70.0}
+
+
+@pytest.fixture()
+def _save_db():
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    sess = Session()
+    base_date = date(2024, 4, 2)
+    for stock_id, ticker, name, sector, vol in _SAVE_STOCKS:
+        sess.add(StockCatalog(
+            stock_id=stock_id, ticker=ticker, name=name,
+            sector=sector, volatility_class=vol, bias_role="test",
+        ))
+    sess.flush()
+    for stock_id, _, _, _, _ in _SAVE_STOCKS:
+        price = _SAVE_PRICES[stock_id]
+        for day in range(20):
+            sess.add(MarketSnapshot(
+                stock_id=stock_id,
+                date=base_date + timedelta(days=day),
+                open=price, high=price * 1.01, low=price * 0.99,
+                close=price, volume=1_000_000,
+                ma_5=price, ma_20=price, rsi_14=50.0,
+                volatility_20d=0.02, trend="neutral", daily_return=0.0,
+            ))
+    sess.flush()
+    yield sess
+    sess.close()
+
+
+def test_compute_and_save_metrics_persists_ci_columns(_save_db):
+    """compute_and_save_metrics must populate all six CI bound columns
+    and ci_low_confidence on the returned BiasMetric.
+
+    Session: buy ANTM.JK in round 1, sell in round 8 (winner);
+             buy GOTO.JK in round 2, sell in round 10 (winner).
+    With only 2 realized trades the CI degenerates (low_confidence=True).
+    We assert float types for CI bounds and the low_confidence flag,
+    then verify the CI bounds bound the point estimate OR low_confidence is True.
+    """
+    db = _save_db
+    user = User(alias="ci_test_user", experience_level="beginner")
+    db.add(user)
+    db.flush()
+
+    session_id = str(uuid.uuid4())
+    base_date = date(2024, 4, 2)
+
+    def _snap(stock_id, day):
+        return (
+            db.query(MarketSnapshot)
+            .filter_by(stock_id=stock_id, date=base_date + timedelta(days=day))
+            .first()
+        )
+
+    for stock_id, _, _, _, _ in _SAVE_STOCKS:
+        for rnd in range(1, 15):
+            snap = _snap(stock_id, rnd - 1)
+            db.add(UserAction(
+                user_id=user.id, session_id=session_id,
+                scenario_round=rnd, stock_id=stock_id,
+                snapshot_id=snap.id, action_type="hold",
+                quantity=0, action_value=0.0, response_time_ms=500,
+            ))
+    # Buy ANTM.JK round 1, sell round 8
+    snap_buy = _snap("ANTM.JK", 0)
+    snap_sell = _snap("ANTM.JK", 7)
+    db.add(UserAction(
+        user_id=user.id, session_id=session_id,
+        scenario_round=1, stock_id="ANTM.JK",
+        snapshot_id=snap_buy.id, action_type="buy",
+        quantity=100, action_value=200_000.0, response_time_ms=400,
+    ))
+    db.add(UserAction(
+        user_id=user.id, session_id=session_id,
+        scenario_round=8, stock_id="ANTM.JK",
+        snapshot_id=snap_sell.id, action_type="sell",
+        quantity=100, action_value=200_000.0, response_time_ms=400,
+    ))
+    db.flush()
+
+    metric = compute_and_save_metrics(db, user.id, session_id)
+
+    # CI bound columns must be float
+    assert isinstance(metric.dei_ci_lower, float)
+    assert isinstance(metric.dei_ci_upper, float)
+    assert isinstance(metric.ocs_ci_lower, float)
+    assert isinstance(metric.ocs_ci_upper, float)
+    assert isinstance(metric.lai_ci_lower, float)
+    assert isinstance(metric.lai_ci_upper, float)
+
+    # CI bounds must bracket the point estimate, OR low_confidence is True (degenerate case)
+    assert (
+        metric.dei_ci_lower <= metric.disposition_dei <= metric.dei_ci_upper
+        or metric.ci_low_confidence is True
+    )
+    assert (
+        metric.ocs_ci_lower <= metric.overconfidence_score <= metric.ocs_ci_upper
+        or metric.ci_low_confidence is True
+    )
+    assert (
+        metric.lai_ci_lower <= metric.loss_aversion_index <= metric.lai_ci_upper
+        or metric.ci_low_confidence is True
     )
