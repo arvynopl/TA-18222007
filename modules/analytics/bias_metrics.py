@@ -473,26 +473,32 @@ def compute_and_save_metrics(
     """
     features = extract_session_features(db_session, user_id, session_id)
 
-    pgr, plr, dei = compute_disposition_effect(features)
-    ocs = compute_overconfidence_score(features)
-    lai = compute_loss_aversion_index(features)
+    result = compute_bias_metrics_with_ci(features)
+    pgr, plr, _ = compute_disposition_effect(features)
 
-    ocs_sev = classify_severity(ocs, OCS_SEVERE, OCS_MODERATE, OCS_MILD)
-    dei_sev = classify_severity(abs(dei), DEI_SEVERE, DEI_MODERATE, DEI_MILD)
-    lai_sev = classify_severity(lai, LAI_SEVERE, LAI_MODERATE, LAI_MILD)
     logger.debug(
         "user=%s session=%s OCS=%.3f(%s) DEI=%.3f(%s) LAI=%.3f(%s)",
-        user_id, session_id[:8], ocs, ocs_sev, dei, dei_sev, lai, lai_sev,
+        user_id, session_id[:8],
+        result.ocs, result.ocs_severity,
+        result.dei, result.dei_severity,
+        result.lai, result.lai_severity,
     )
 
     metric = BiasMetric(
         user_id=user_id,
         session_id=session_id,
-        overconfidence_score=ocs,
+        overconfidence_score=result.ocs,
         disposition_pgr=pgr,
         disposition_plr=plr,
-        disposition_dei=dei,
-        loss_aversion_index=lai,
+        disposition_dei=result.dei,
+        loss_aversion_index=result.lai,
+        dei_ci_lower=result.dei_ci[0],
+        dei_ci_upper=result.dei_ci[1],
+        ocs_ci_lower=result.ocs_ci[0],
+        ocs_ci_upper=result.ocs_ci[1],
+        lai_ci_lower=result.lai_ci[0],
+        lai_ci_upper=result.lai_ci[1],
+        ci_low_confidence=result.low_confidence,
         computed_at=datetime.now(timezone.utc),
     )
     db_session.add(metric)

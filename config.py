@@ -72,6 +72,13 @@ MARKET_SNAPSHOTS_FILE = DATA_DIR / "all_market_snapshots.csv"
 # Volatility classes considered "high risk"
 HIGH_VOLATILITY_CLASSES = {"high"}
 
+# Design note: only "high" volatility stocks contribute to observed_risk
+# in update_profile(). Stocks with volatility_class "medium" or below
+# count as zero-risk regardless of trading frequency. This is a deliberate
+# simplification: risk_preference tracks exposure to the most volatile
+# instruments. Future work may extend this to a multi-tier weighting
+# (e.g., medium=0.5, high=1.0) for a more granular risk-appetite signal.
+
 
 # ---------------------------------------------------------------------------
 # Startup validation

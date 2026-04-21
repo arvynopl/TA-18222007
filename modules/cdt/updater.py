@@ -44,6 +44,8 @@ def update_profile(
                              + (1 − effective_alpha) × old_loss_aversion
 
         observed_risk      = high_vol_trades / max(total_buy_sell_trades, 1)
+        # Note: only HIGH_VOLATILITY_CLASSES trades count toward high_vol_count.
+        # Trades in "medium" or lower volatility stocks contribute 0 to observed_risk.
         new_risk_pref      = BETA × observed_risk + (1 − BETA) × old_risk_pref
 
     Args:
