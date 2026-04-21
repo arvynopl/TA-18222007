@@ -50,6 +50,13 @@ def _apply_schema_migrations(engine: Engine) -> None:
     migrations = [
         # (table_name, column_name, column_definition)
         ("cognitive_profiles", "interaction_scores", "JSON DEFAULT NULL"),
+        ("bias_metrics", "dei_ci_lower", "REAL DEFAULT NULL"),
+        ("bias_metrics", "dei_ci_upper", "REAL DEFAULT NULL"),
+        ("bias_metrics", "ocs_ci_lower", "REAL DEFAULT NULL"),
+        ("bias_metrics", "ocs_ci_upper", "REAL DEFAULT NULL"),
+        ("bias_metrics", "lai_ci_lower", "REAL DEFAULT NULL"),
+        ("bias_metrics", "lai_ci_upper", "REAL DEFAULT NULL"),
+        ("bias_metrics", "ci_low_confidence", "INTEGER DEFAULT NULL"),
     ]
     with engine.connect() as conn:
         for table, column, col_def in migrations:
