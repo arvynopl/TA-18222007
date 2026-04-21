@@ -1,10 +1,10 @@
 """
 database/models.py — SQLAlchemy ORM entity definitions.
 
-Eleven SQLAlchemy ORM entities + indexes (incl. UserSurvey, CdtSnapshot):
+Twelve SQLAlchemy ORM entities + indexes (incl. PostSessionSurvey, CdtSnapshot):
     User, StockCatalog, MarketSnapshot, UserAction,
     BiasMetric, CognitiveProfile, FeedbackHistory,
-    ConsentLog, UserSurvey, SessionSummary, CdtSnapshot
+    ConsentLog, UserSurvey, SessionSummary, CdtSnapshot, PostSessionSurvey
 """
 
 from datetime import datetime, timezone, date as date_type
@@ -45,6 +45,12 @@ class User(Base):
     )
     survey = relationship(
         "UserSurvey", back_populates="user", uselist=False, cascade="all, delete-orphan"
+    )
+    post_session_surveys = relationship(
+        "PostSessionSurvey",
+        back_populates="user",
+        lazy="dynamic",
+        cascade="all, delete-orphan",
     )
 
     def __repr__(self) -> str:
@@ -166,6 +172,15 @@ class BiasMetric(Base):
 
     # Loss Aversion
     loss_aversion_index: Optional[float] = Column(Float, nullable=True)
+
+    # 95% bootstrap confidence interval bounds
+    dei_ci_lower: Optional[float] = Column(Float, nullable=True)
+    dei_ci_upper: Optional[float] = Column(Float, nullable=True)
+    ocs_ci_lower: Optional[float] = Column(Float, nullable=True)
+    ocs_ci_upper: Optional[float] = Column(Float, nullable=True)
+    lai_ci_lower: Optional[float] = Column(Float, nullable=True)
+    lai_ci_upper: Optional[float] = Column(Float, nullable=True)
+    ci_low_confidence: Optional[bool] = Column(Boolean, nullable=True)
 
     computed_at: datetime = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
@@ -381,6 +396,8 @@ class PostSessionSurvey(Base):
     submitted_at: datetime = Column(
         DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )
+
+    user = relationship("User", back_populates="post_session_surveys")
 
     def __repr__(self) -> str:
         return (
