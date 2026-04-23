@@ -413,10 +413,6 @@ def render_feedback_page(user_id: int, session_id: str) -> None:
             prev_severity=prev_severities.get(fb["bias_type"]),
         )
 
-    render_longitudinal_section(user_id)
-
-    render_interaction_synthesis(user_id=user_id, session_id=session_id)
-
     render_stated_vs_revealed(user_id)
 
     # --- Session navigation CTAs ---
