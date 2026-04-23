@@ -52,6 +52,17 @@ class SessionFeatures:
     avg_response_time_ms: float = 0.0
     max_response_time_ms: int = 0
     portfolio_return_pct: float = 0.0
+    # ── Technical indicator behavioral features ──────────────────────────────
+    # These are populated by extract_session_features() when MarketSnapshot
+    # indicator columns (rsi_14, ma_20, volatility_20d, trend) are non-null.
+    # All rates are in [0.0, 1.0]; averages use the full action set.
+    avg_rsi_at_buy: float = 0.0           # Mean RSI-14 at all buy actions
+    overbought_buy_rate: float = 0.0      # Fraction of buys where RSI > 70 (overbought zone)
+    avg_rsi_at_sell: float = 0.0          # Mean RSI-14 at all sell actions
+    trend_following_buy_rate: float = 0.0 # Fraction of buys where trend = "up"
+    counter_trend_hold_rate: float = 0.0  # Fraction of holds where trend = "down"
+    avg_volatility_at_buy: float = 0.0    # Mean 20-day rolling volatility at buy actions
+    buy_above_ma20_rate: float = 0.0      # Fraction of buys where close > MA20
 
 
 def extract_session_features(
@@ -80,6 +91,19 @@ def extract_session_features(
 
     features = SessionFeatures(user_id=user_id, session_id=session_id)
     features.initial_value = INITIAL_CAPITAL
+
+    # ── Pre-pass: batch-fetch all MarketSnapshot rows for indicator data ─────
+    # This avoids N+1 queries inside the main loop. We gather all unique
+    # snapshot_ids from the action set, fetch in one query, then cache.
+    all_snapshot_ids = list({a.snapshot_id for a in actions if a.snapshot_id})
+    snapshot_cache: dict[int, "MarketSnapshot"] = {}
+    if all_snapshot_ids:
+        snaps = (
+            db_session.query(MarketSnapshot)
+            .filter(MarketSnapshot.id.in_(all_snapshot_ids))
+            .all()
+        )
+        snapshot_cache = {s.id: s for s in snaps}
 
     cash = INITIAL_CAPITAL
     # holdings: stock_id → {quantity, avg_price, buy_round}
@@ -194,5 +218,59 @@ def extract_session_features(
         (features.final_value - features.initial_value)
         / max(features.initial_value, 1.0)
     ) * 100.0
+
+    # ── Pass 3: compute technical indicator behavioral statistics ─────────────
+    buy_rsi_vals: list[float] = []
+    sell_rsi_vals: list[float] = []
+    overbought_buys: int = 0
+    trend_following_buys: int = 0
+    counter_trend_holds: int = 0
+    volatility_at_buy: list[float] = []
+    buy_above_ma20: int = 0
+    total_holds: int = 0
+
+    for action in actions:
+        snap = snapshot_cache.get(action.snapshot_id)
+        if snap is None:
+            continue
+
+        rsi = getattr(snap, "rsi_14", None)
+        ma20 = getattr(snap, "ma_20", None)
+        vol = getattr(snap, "volatility_20d", None)
+        trend = getattr(snap, "trend", None)
+        close = getattr(snap, "close", None)
+
+        if action.action_type == "buy" and action.quantity > 0:
+            if rsi is not None:
+                buy_rsi_vals.append(float(rsi))
+                if float(rsi) > 70.0:
+                    overbought_buys += 1
+            if trend == "up":
+                trend_following_buys += 1
+            if vol is not None:
+                volatility_at_buy.append(float(vol))
+            if close is not None and ma20 is not None and float(close) > float(ma20):
+                buy_above_ma20 += 1
+
+        elif action.action_type == "sell" and action.quantity > 0:
+            if rsi is not None:
+                sell_rsi_vals.append(float(rsi))
+
+        else:  # hold
+            total_holds += 1
+            if trend == "down":
+                counter_trend_holds += 1
+
+    # Populate SessionFeatures indicator fields
+    n_buys = features.buy_count
+    n_sells = features.sell_count
+
+    features.avg_rsi_at_buy = (sum(buy_rsi_vals) / len(buy_rsi_vals)) if buy_rsi_vals else 0.0
+    features.avg_rsi_at_sell = (sum(sell_rsi_vals) / len(sell_rsi_vals)) if sell_rsi_vals else 0.0
+    features.overbought_buy_rate = (overbought_buys / n_buys) if n_buys > 0 else 0.0
+    features.trend_following_buy_rate = (trend_following_buys / n_buys) if n_buys > 0 else 0.0
+    features.counter_trend_hold_rate = (counter_trend_holds / total_holds) if total_holds > 0 else 0.0
+    features.avg_volatility_at_buy = (sum(volatility_at_buy) / len(volatility_at_buy)) if volatility_at_buy else 0.0
+    features.buy_above_ma20_rate = (buy_above_ma20 / n_buys) if n_buys > 0 else 0.0
 
     return features
