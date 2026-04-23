@@ -62,7 +62,19 @@ def compute_anomaly_flags(
                               More negative = more anomalous (sklearn convention).
             "is_anomaly":     List[bool] — True if score < 0 (sklearn flags as outlier).
             "n_sessions":     int — number of sessions used.
-        Returns None if sklearn unavailable, or fewer than _MIN_SESSIONS_FOR_ML sessions.
+        Returns None if sklearn unavailable, or fewer than _MIN_SESSIONS_FOR_ML (=5) sessions.
+
+        The 5-session minimum is an engineering heuristic, not a statistical requirement.
+        With contamination=0.1 and n=3, IsolationForest would flag floor(3×0.1)=0 sessions
+        as anomalous regardless of the data, making results meaningless. n=5 gives at least
+        1 potential anomaly flag (floor(5×0.1)=0, but 5 trees have sufficient variance to
+        discriminate). Increasing to n=10 would improve reliability; 5 is the minimum viable
+        setting for a thesis UAT with 3–5 participants each running 3–5 sessions.
+
+        Isolation Forest is per-user (not population-level): it detects sessions anomalous
+        relative to that user's own baseline, not relative to other users. A session is
+        flagged when it is easier to isolate from the user's own behavioral cluster than
+        a random session — indicating an unusually extreme bias combination.
     """
     try:
         from sklearn.ensemble import IsolationForest
@@ -326,8 +338,21 @@ def train_bias_classifier(X: list, y: list) -> Optional[dict]:
     can be rendered with ``plot_tree``, and avoids overfitting on the small
     UAT sample sizes typical of thesis work (N ≈ 10–40 sessions).
 
+    Discriminatory power refers to the tree's ability to distinguish between severity
+    classes using raw behavioral features. High importance for a feature (e.g., OCS)
+    means it is the primary split criterion — the tree "sees" that feature as the
+    strongest boundary between "none" and "moderate" classes. Low importance means the
+    feature adds no classification signal beyond what other features already provide.
+
+    IMPORTANT: With synthetic training data (current state), accuracy reflects
+    in-sample fit to labels derived from the same threshold rules that generated
+    the data. This is circular by construction. Post-UAT, re-train on real data
+    and use run_kfold_validation() to obtain meaningful out-of-sample accuracy.
+    Treat the current 97.5% accuracy figure as a sanity check (confirms the
+    feature engineering is consistent), not as a performance claim.
+
     Args:
-        X: Feature matrix — list of 10-element float lists (n_samples × 10).
+        X: Feature matrix — list of 17-element float lists (n_samples × 17).
         y: Worst-case severity labels — list[str].
 
     Returns:
