@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-04-14T05:05:54.236662+00:00",
+  "generated_at": "2026-04-23T19:41:57.334641+00:00",
   "model": "DecisionTreeClassifier(max_depth=4, criterion='gini', class_weight='balanced', min_samples_leaf=2, random_state=42)",
   "overall_accuracy": 0.975,
   "n_training_samples": 40,
@@ -13,9 +13,9 @@
     "Investor Multi-Bias"
   ],
   "class_counts": {
-    "none": 6,
-    "moderate": 18,
     "severe": 14,
+    "moderate": 18,
+    "none": 6,
     "mild": 2
   },
   "feature_names": [
@@ -28,7 +28,14 @@
     "hold_ratio",
     "portfolio_return_pct",
     "realized_count_norm",
-    "ocs_x_lai"
+    "ocs_x_lai",
+    "avg_rsi_at_buy",
+    "overbought_buy_rate",
+    "avg_rsi_at_sell",
+    "trend_following_buy_rate",
+    "counter_trend_hold_rate",
+    "avg_volatility_at_buy",
+    "buy_above_ma20_rate"
   ],
   "notes": "Akurasi dihitung pada data latih (in-sample). Untuk evaluasi generalisasi, lihat laporan klasifikasi per-kelas (CSV). Data sintetis ditambahkan karena hanya ada 0 rekaman di database (minimum diperlukan: 20)."
 }

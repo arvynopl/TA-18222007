@@ -203,7 +203,7 @@ def generate_tldr_summary(bias_results: dict) -> str:
     return _SUMMARIES[best_key][severity]
 
 _INTERACTION_THRESHOLD = 0.65  # Strong coupling threshold (Cohen 1988)
-_MIN_SESSIONS_FOR_INTERACTION = 5
+_MIN_SESSIONS_FOR_INTERACTION = 3   # FIXED: align with interaction.py minimum (was 5, caused UAT suppression)
 
 _BIAS_METRIC_KEY: dict[str, str] = {
     "overconfidence": "overconfidence_score",
@@ -576,6 +576,21 @@ def generate_feedback(
         },
     ]
 
+    # ── Confidence override: suppress misleading severity when data is insufficient ──
+    # Import is deferred to avoid circular imports at module load time.
+    from modules.analytics.bias_metrics import (
+        compute_disposition_effect_result,
+        compute_loss_aversion_index_result,
+    )
+    from modules.analytics.features import SessionFeatures as _SF
+
+    _sf_for_gate = _SF(user_id=user_id, session_id=session_id)
+    _sf_for_gate.realized_trades = realized_trades
+    _sf_for_gate.open_positions = open_positions
+
+    dei_result = compute_disposition_effect_result(_sf_for_gate)
+    lai_result = compute_loss_aversion_index_result(_sf_for_gate)
+
     records: list[FeedbackHistory] = []
     for cfg in bias_configs:
         severity = classify_severity(
@@ -585,6 +600,30 @@ def generate_feedback(
             cfg.get("mild_t"),
             min_sample_met=cfg.get("min_sample_met", True),
         )
+
+        # When DEI or LAI data is insufficient, downgrade severity to "none"
+        # so the feedback template does not mischaracterize the user's behavior.
+        # Only override when BiasMetric itself also shows no evidence of trades
+        # (guards against the case where realized_trades is not passed but
+        # the BiasMetric was computed from real data in the DB).
+        _bias_pgr = bias_metric.disposition_pgr or 0.0
+        _bias_plr = bias_metric.disposition_plr or 0.0
+        _bias_dei = abs(bias_metric.disposition_dei or 0.0)
+        _bias_has_trade_evidence = _bias_pgr > 1e-9 or _bias_plr > 1e-9 or _bias_dei > 1e-9
+        _bias_lai = bias_metric.loss_aversion_index or 0.0
+
+        if (cfg["bias_type"] == "disposition_effect"
+                and dei_result.confidence == "insufficient"
+                and not _bias_has_trade_evidence):
+            severity = "none"
+            logger.debug("generate_feedback: DEI confidence=insufficient → severity forced to none")
+        if (cfg["bias_type"] == "loss_aversion"
+                and lai_result.confidence == "insufficient"
+                and not _bias_has_trade_evidence
+                and _bias_lai < 1e-9):
+            severity = "none"
+            logger.debug("generate_feedback: LAI confidence=insufficient → severity forced to none")
+
         logger.debug("bias=%s value=%.3f severity=%s", cfg["bias_type"], cfg["value"], severity)
 
         if not has_trades:
