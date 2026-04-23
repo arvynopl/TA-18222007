@@ -21,7 +21,7 @@ Public functions:
 
 Exported constants:
     SEVERITY_ORDER            — {"none":0, "mild":1, "moderate":2, "severe":3}
-    DECISION_TREE_FEATURE_NAMES — ordered list of 10 feature keys.
+    DECISION_TREE_FEATURE_NAMES — ordered list of 17 feature keys.
     FEATURE_LABELS_ID          — Bahasa Indonesia display labels for charts.
 """
 
@@ -126,16 +126,27 @@ SEVERITY_ORDER: dict[str, int] = {"none": 0, "mild": 1, "moderate": 2, "severe":
 
 #: Ordered feature names used for the decision-tree feature matrix (10 dims).
 DECISION_TREE_FEATURE_NAMES: list[str] = [
+    # Core bias metrics (3)
     "ocs",
     "abs_dei",
     "lai_norm",
+    # DEI sub-components (2)
     "pgr",
     "plr",
+    # Session-level behavioral features (5)
     "trade_frequency",
     "hold_ratio",
     "portfolio_return_pct",
     "realized_count_norm",
     "ocs_x_lai",
+    # Technical indicator behavioral features (7) \u2014 NEW
+    "avg_rsi_at_buy",
+    "overbought_buy_rate",
+    "avg_rsi_at_sell",
+    "trend_following_buy_rate",
+    "counter_trend_hold_rate",
+    "avg_volatility_at_buy",
+    "buy_above_ma20_rate",
 ]
 
 #: Bahasa Indonesia display labels keyed by feature name (for thesis charts).
@@ -150,6 +161,14 @@ FEATURE_LABELS_ID: dict[str, str] = {
     "portfolio_return_pct": "Return Portofolio (fraksi)",
     "realized_count_norm":  "Jml. Perdagangan Terealisasi (norm.)",
     "ocs_x_lai":            "Interaksi OCS \u00d7 LAI",
+    # New indicator behavioral features
+    "avg_rsi_at_buy":           "Rata-rata RSI saat Beli",
+    "overbought_buy_rate":      "Rasio Beli di Zona Overbought (RSI>70)",
+    "avg_rsi_at_sell":          "Rata-rata RSI saat Jual",
+    "trend_following_buy_rate": "Rasio Beli Mengikuti Tren Naik",
+    "counter_trend_hold_rate":  "Rasio Tahan Melawan Tren Turun",
+    "avg_volatility_at_buy":    "Rata-rata Volatilitas saat Beli",
+    "buy_above_ma20_rate":      "Rasio Beli di Atas MA20",
 }
 
 
@@ -201,17 +220,24 @@ def build_feature_matrix(
     ratio, portfolio return, realised-trade count).  Falls back to metric-derived
     proxies when the corresponding UserAction rows are absent.
 
-    Feature vector layout (10 dims — matches DECISION_TREE_FEATURE_NAMES):
-        0  ocs                  OCS score from BiasMetric
-        1  abs_dei              |DEI| from BiasMetric
-        2  lai_norm             min(LAI / LAI_EMA_CEILING, 1.0)
-        3  pgr                  Proportion Gain Realised (BiasMetric)
-        4  plr                  Proportion Loss Realised (BiasMetric)
-        5  trade_frequency      (buy + sell) / ROUNDS_PER_SESSION  (SessionFeatures)
-        6  hold_ratio           hold_count / total_actions          (SessionFeatures)
-        7  portfolio_return_pct (final − initial) / initial         (SessionFeatures)
-        8  realized_count_norm  min(realized_trade_count / 10, 1.0) (SessionFeatures)
-        9  ocs_x_lai            OCS × lai_norm  (interaction term)
+    Feature vector layout (17 dims — matches DECISION_TREE_FEATURE_NAMES):
+        0  ocs                      OCS score from BiasMetric
+        1  abs_dei                  |DEI| from BiasMetric
+        2  lai_norm                 min(LAI / LAI_EMA_CEILING, 1.0)
+        3  pgr                      Proportion Gain Realised (BiasMetric)
+        4  plr                      Proportion Loss Realised (BiasMetric)
+        5  trade_frequency          (buy + sell) / ROUNDS_PER_SESSION  (SessionFeatures)
+        6  hold_ratio               hold_count / total_actions          (SessionFeatures)
+        7  portfolio_return_pct     (final − initial) / initial         (SessionFeatures)
+        8  realized_count_norm      min(realized_trade_count / 10, 1.0) (SessionFeatures)
+        9  ocs_x_lai                OCS × lai_norm  (interaction term)
+        10 avg_rsi_at_buy           Mean RSI-14 at buy actions
+        11 overbought_buy_rate      Fraction of buys where RSI > 70
+        12 avg_rsi_at_sell          Mean RSI-14 at sell actions
+        13 trend_following_buy_rate Fraction of buys where trend = "up"
+        14 counter_trend_hold_rate  Fraction of holds where trend = "down"
+        15 avg_volatility_at_buy    Mean 20-day volatility at buy actions
+        16 buy_above_ma20_rate      Fraction of buys where close > MA20
 
     Args:
         db_session: Active SQLAlchemy session.
@@ -219,7 +245,7 @@ def build_feature_matrix(
 
     Returns:
         Tuple ``(X, y, feature_names)``:
-            X            — list[list[float]], shape (n, 10).
+            X            — list[list[float]], shape (n, 17).
             y            — list[str], worst-case severity labels.
             feature_names — :data:`DECISION_TREE_FEATURE_NAMES`.
     """
@@ -245,12 +271,23 @@ def build_feature_matrix(
             hold_ratio = sf.hold_count / max(total_actions, 1)
             ret_frac = sf.portfolio_return_pct / 100.0
             realized_norm = min(sf.realized_trade_count / 10.0, 1.0)
+            # Technical indicator features (default to 0.0 if not populated)
+            avg_rsi_buy        = getattr(sf, "avg_rsi_at_buy", 0.0)
+            overbought_rate    = getattr(sf, "overbought_buy_rate", 0.0)
+            avg_rsi_sell       = getattr(sf, "avg_rsi_at_sell", 0.0)
+            trend_follow_rate  = getattr(sf, "trend_following_buy_rate", 0.0)
+            counter_hold_rate  = getattr(sf, "counter_trend_hold_rate", 0.0)
+            avg_vol_buy        = getattr(sf, "avg_volatility_at_buy", 0.0)
+            buy_above_ma_rate  = getattr(sf, "buy_above_ma20_rate", 0.0)
         except Exception:
             # No action data available; derive behavioural proxies from metric values
             trade_freq = min(ocs * 0.7, 1.0)
             hold_ratio = max(0.0, 1.0 - trade_freq)
             ret_frac = 0.0
             realized_norm = 0.0
+            avg_rsi_buy = overbought_rate = avg_rsi_sell = 0.0
+            trend_follow_rate = counter_hold_rate = 0.0
+            avg_vol_buy = buy_above_ma_rate = 0.0
 
         row = [
             ocs,
@@ -263,6 +300,14 @@ def build_feature_matrix(
             ret_frac,
             realized_norm,
             ocs * lai_norm,
+            # Technical indicator features
+            avg_rsi_buy,
+            overbought_rate,
+            avg_rsi_sell,
+            trend_follow_rate,
+            counter_hold_rate,
+            avg_vol_buy,
+            buy_above_ma_rate,
         ]
         X.append(row)
         y.append(derive_worst_severity(ocs, dei, lai_raw))
