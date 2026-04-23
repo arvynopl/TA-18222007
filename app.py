@@ -497,7 +497,11 @@ def _page_profil() -> None:
                 "session_num": i + 1,
                 "ocs": m.overconfidence_score or 0.0,
                 "dei": abs(m.disposition_dei or 0.0),
+                "dei_raw": m.disposition_dei or 0.0,
+                "pgr": m.disposition_pgr or 0.0,
+                "plr": m.disposition_plr or 0.0,
                 "lai_norm": min((m.loss_aversion_index or 0.0) / 3.0, 1.0),
+                "lai_raw": m.loss_aversion_index or 0.0,
                 "computed_at": m.computed_at,
             }
             for i, m in enumerate(past_metrics)
@@ -517,7 +521,6 @@ def _page_profil() -> None:
             )
         ]
         profile_data = None
-        anomaly_data = None
         if profile:
             profile_data = {
                 "bias_vector": dict(profile.bias_intensity_vector),
@@ -527,9 +530,6 @@ def _page_profil() -> None:
                 "last_updated_at": profile.last_updated_at,
                 "interaction_scores": profile.interaction_scores,
             }
-            # Fetch ML anomaly flags (requires sklearn; silently degrades)
-            from modules.cdt.ml_validator import compute_anomaly_flags
-            anomaly_data = compute_anomaly_flags(sess, user_id)
 
     if profile_data is None:
         st.info("Selesaikan setidaknya satu sesi simulasi untuk melihat profil kognitifmu.")
@@ -614,10 +614,7 @@ def _page_profil() -> None:
             "seluruh sesimu (oranye). Garis putus-putus = ambang batas perhatian (0.5)."
         )
 
-    # --- CDT bias intensity vector radar (longitudinal EMA state) ---
     bv = profile_data["bias_vector"]
-    radar = build_radar_chart(bv, "Vektor Intensitas Bias (CDT — EMA)")
-    st.plotly_chart(radar, use_container_width=True)
 
     # --- Session history line chart ---
     if len(metrics_data) >= 2:
@@ -646,185 +643,6 @@ def _page_profil() -> None:
         line_fig.update_yaxes(title_text="Intensitas Bias (0–1)", range=[0, 1])
         apply_chart_theme(line_fig, height=380)
         st.plotly_chart(line_fig, use_container_width=True)
-
-    # --- Cross-Bias Interaction Scores ---
-    interaction = profile_data.get("interaction_scores")
-    if interaction:
-        st.subheader("🔗 Interaksi Antar Bias")
-        st.caption(
-            "Korelasi Pearson antara bias-biasmu. Nilai mendekati +1 berarti dua bias "
-            "sering muncul bersamaan; mendekati -1 berarti saling berlawanan."
-        )
-
-        def _fmt_corr(v) -> str:
-            if v is None:
-                return "—"
-            bar = "█" * int(abs(v) * 10)
-            direction = "+" if v >= 0 else "−"
-            return f"{direction}{abs(v):.2f} {bar}"
-
-        ic1, ic2, ic3 = st.columns(3)
-        ic1.metric(
-            "OCS ↔ |DEI|",
-            _fmt_corr(interaction.get("ocs_dei")),
-            help="Korelasi antara Overconfidence dan Efek Disposisi",
-            delta=" ", delta_color="off",
-        )
-        ic2.metric(
-            "OCS ↔ LAI",
-            _fmt_corr(interaction.get("ocs_lai")),
-            help="Korelasi antara Overconfidence dan Loss Aversion",
-            delta=" ", delta_color="off",
-        )
-        ic3.metric(
-            "│DEI│ ↔ LAI",
-            _fmt_corr(interaction.get("dei_lai")),
-            help="Korelasi antara Efek Disposisi dan Loss Aversion",
-            delta=" ", delta_color="off",
-        )
-
-        # Narrative interpretation for the strongest pair
-        valid_pairs = {k: v for k, v in interaction.items() if v is not None}
-        if valid_pairs:
-            strongest_pair = max(valid_pairs, key=lambda k: abs(valid_pairs[k]))
-            val = valid_pairs[strongest_pair]
-            pair_names = {
-                "ocs_dei": "Overconfidence dan Efek Disposisi",
-                "ocs_lai": "Overconfidence dan Loss Aversion",
-                "dei_lai": "Efek Disposisi dan Loss Aversion",
-            }
-            if abs(val) >= 0.6:
-                direction = "cenderung muncul bersamaan" if val > 0 else "saling berlawanan"
-                st.info(
-                    f"💡 **{pair_names[strongest_pair]}** {direction} (r={val:+.2f}). "
-                    f"Ini menunjukkan pola perilaku yang saling terkait pada profilmu."
-                )
-
-    # --- Peta Interaksi Bias (DEI × OCS heatmap) ---
-    st.subheader("🗺️ Peta Interaksi Bias")
-    st.caption(
-        "Visualisasi posisi biasmu dalam ruang interaksi DEI × OCS. "
-        "Zona merah menandakan risiko tinggi akibat kombinasi Overconfidence dan Efek Disposisi."
-    )
-    if len(snapshots_data) < 2:
-        st.info("Selesaikan minimal 2 sesi untuk melihat peta interaksi Anda.")
-    else:
-        from modules.cdt.interaction import build_interaction_heatmap_data
-
-        hm_data = build_interaction_heatmap_data(snapshots_data)
-
-        hm_fig = go.Figure()
-
-        # Background: joint severity heatmap (blue=low → orange=moderate → red=high)
-        hm_fig.add_trace(go.Heatmap(
-            x=hm_data["x"],
-            y=hm_data["y"],
-            z=hm_data["z"],
-            colorscale=[
-                [0.0, "#1a3a5c"],   # deep blue  – low risk
-                [0.5, "#F5A623"],   # amber      – moderate risk
-                [1.0, "#E8553A"],   # red-orange – high risk
-            ],
-            zmin=0.0,
-            zmax=1.0,
-            showscale=True,
-            colorbar=dict(
-                title=dict(text="Tingkat<br>Interaksi", font=dict(color="#E0E0E0", size=11)),
-                tickfont=dict(color="#E0E0E0"),
-                thickness=14,
-            ),
-            hovertemplate=(
-                "DEI: %{x:.2f}<br>OCS: %{y:.2f}<br>Interaksi: %{z:.2f}"
-                "<extra></extra>"
-            ),
-        ))
-
-        # User trajectory: numbered scatter points
-        hm_fig.add_trace(go.Scatter(
-            x=hm_data["scatter_x"],
-            y=hm_data["scatter_y"],
-            mode="markers+text",
-            marker=dict(
-                size=16,
-                color="white",
-                line=dict(color="#E8553A", width=2),
-                symbol="circle",
-            ),
-            text=hm_data["scatter_labels"],
-            textposition="top center",
-            textfont=dict(color="white", size=11, family="sans-serif"),
-            hovertext=hm_data["scatter_text"],
-            hoverinfo="text",
-            name="Sesi Anda",
-        ))
-
-        hm_fig.update_xaxes(
-            title_text="Skor DEI (Efek Disposisi)",
-            range=[0, 1],
-            gridcolor="#2a3a4a",
-            zeroline=False,
-        )
-        hm_fig.update_yaxes(
-            title_text="Skor OCS (Overconfidence)",
-            range=[0, 1],
-            gridcolor="#2a3a4a",
-            zeroline=False,
-        )
-        apply_chart_theme(hm_fig, height=460)
-        # Override legend placement — single-trace heatmap doesn't need a legend
-        hm_fig.update_layout(showlegend=False)
-        st.plotly_chart(hm_fig, use_container_width=True)
-        st.caption(
-            "Titik merah menunjukkan pola perdagangan berisiko tinggi "
-            "(Overconfident + Disposition Effect)"
-        )
-
-    # --- ML Anomaly Detection Panel ---
-    if anomaly_data:
-        st.subheader("🤖 Deteksi Sesi Anomali (ML)")
-        n = anomaly_data["n_sessions"]
-        n_anomaly = sum(anomaly_data["is_anomaly"])
-        st.caption(
-            f"Isolation Forest dijalankan pada {n} sesi. "
-            f"Sesi yang strukturnya menyimpang dari baseline perilakumu ditandai sebagai anomali."
-        )
-
-        if n_anomaly == 0:
-            st.success(
-                "✅ Tidak ada sesi anomali terdeteksi — pola biasmu konsisten di semua sesi."
-            )
-        else:
-            st.warning(
-                f"⚠️ {n_anomaly} dari {n} sesi menunjukkan profil bias yang tidak biasa. "
-                f"Ini bisa berarti kamu bereksperimen dengan strategi berbeda, "
-                f"atau kondisi pasar mendorong perilaku yang tidak khas."
-            )
-
-        import pandas as pd
-        rows = []
-        for i, (sid, score, flag) in enumerate(
-            zip(
-                anomaly_data["session_ids"],
-                anomaly_data["anomaly_scores"],
-                anomaly_data["is_anomaly"],
-            )
-        ):
-            rows.append({
-                "Sesi": f"#{i + 1}",
-                "Anomali": "⚠️ Ya" if flag else "✅ Normal",
-                "Skor": f"{score:.3f}",
-                "ID (8 digit)": sid[:8],
-            })
-        df = pd.DataFrame(rows)
-        st.dataframe(df, use_container_width=True, hide_index=True)
-    elif profile_data["session_count"] > 0:
-        from modules.cdt.ml_validator import _MIN_SESSIONS_FOR_ML
-        remaining = _MIN_SESSIONS_FOR_ML - profile_data["session_count"]
-        if remaining > 0:
-            st.caption(
-                f"🤖 Deteksi anomali ML tersedia setelah {_MIN_SESSIONS_FOR_ML} sesi "
-                f"(butuh {remaining} sesi lagi)."
-            )
 
     # --- Insight section ---
     st.subheader("💡 Insight")
@@ -876,6 +694,73 @@ def _page_profil() -> None:
         if st.button("🚀 Mulai Sesi Baru →", use_container_width=True, type="primary"):
             st.session_state["current_page"] = "Simulasi Investasi"
             st.rerun()
+
+    # --- Tentang Metrik Ini ---
+    st.divider()
+    with st.expander("📖 Tentang Metrik yang Digunakan", expanded=False):
+        st.caption(
+            "Penjelasan formula ilmiah di balik setiap bias, beserta nilaimu dari sesi terakhir."
+        )
+
+        if metrics_data:
+            latest = metrics_data[-1]
+            sesi_label = f"Sesi {latest['session_num']}"
+
+            # DEI
+            st.markdown("#### Efek Disposisi (DEI)")
+            st.markdown(
+                "**Formula:** DEI = PGR − PLR &nbsp;*(Odean, 1998 — Journal of Finance)*\n\n"
+                "- **PGR** (Proportion of Gains Realized) = Realisasi Untung ÷ (Realisasi Untung + Untung di Atas Kertas)\n"
+                "- **PLR** (Proportion of Losses Realized) = Realisasi Rugi ÷ (Realisasi Rugi + Rugi di Atas Kertas)\n\n"
+                "DEI > 0 berarti investor lebih cenderung merealisasi untung daripada rugi — ciri khas disposition effect."
+            )
+            pgr = latest.get("pgr", 0.0)
+            plr = latest.get("plr", 0.0)
+            dei_val = latest.get("dei_raw", 0.0)
+            st.info(
+                f"**{sesi_label}:** DEI = {dei_val:+.3f} | "
+                f"PGR = {pgr:.3f} ({pgr*100:.1f}% saham untung direalisasi) | "
+                f"PLR = {plr:.3f} ({plr*100:.1f}% saham rugi direalisasi)"
+            )
+
+            st.divider()
+
+            # OCS
+            st.markdown("#### Overconfidence Score (OCS)")
+            st.markdown(
+                "**Formula:** OCS = sigmoid(frekuensi_trading ÷ max(rasio_kinerja, 0.01)) "
+                "&nbsp;*(Barber & Odean, 2000 — Journal of Finance)*\n\n"
+                "Frekuensi trading tinggi dengan kinerja rendah menghasilkan OCS mendekati 1.0. "
+                "Investor yang terlalu percaya diri cenderung overtrade dengan hasil yang tidak optimal."
+            )
+            ocs_val = latest.get("ocs", 0.0)
+            st.info(f"**{sesi_label}:** OCS = {ocs_val:.3f}")
+
+            st.divider()
+
+            # LAI
+            st.markdown("#### Loss Aversion Index (LAI)")
+            st.markdown(
+                "**Formula:** LAI = rata-rata durasi tahan posisi rugi ÷ max(rata-rata durasi tahan posisi untung, 1) "
+                "&nbsp;*(Kahneman & Tversky, 1979 — Prospect Theory, Nobel 2002)*\n\n"
+                "LAI > 1.0 berarti investor menahan saham rugi lebih lama dari saham untung. "
+                "LAI ≥ 2.0 dikategorikan berat (Berat: ≥2.0 | Sedang: ≥1.5 | Ringan: ≥1.2)."
+            )
+            lai_val = latest.get("lai_raw", 0.0)
+            st.info(f"**{sesi_label}:** LAI = {lai_val:.3f}×")
+
+            st.divider()
+
+            # CDT EMA
+            st.markdown("#### Model CDT — Exponential Moving Average (EMA)")
+            st.markdown(
+                "**Formula:** BiasIntensity(t) = 0.3 × metric(t) + 0.7 × BiasIntensity(t−1)\n\n"
+                "Profil CDT tidak langsung berubah pada satu sesi — ia mempertimbangkan "
+                "riwayat semua sesimu dengan bobot lebih besar pada sesi terbaru (α = 0.3). "
+                "Ini membuat profil stabil terhadap fluktuasi satu sesi yang tidak representatif."
+            )
+        else:
+            st.info("Selesaikan minimal satu sesi untuk melihat nilaimu di sini.")
 
     # --- Data Export Section ---
     st.divider()
