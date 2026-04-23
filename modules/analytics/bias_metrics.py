@@ -76,6 +76,89 @@ class BiasMetricsWithCI:
     ocs_severity: str
     lai_severity: str
     low_confidence: bool = False
+    # Confidence metadata (populated by compute_bias_metrics_with_ci)
+    dei_confidence: str = "high"   # "insufficient" | "low" | "medium" | "high"
+    lai_confidence: str = "high"
+    dei_note: str = ""             # Bahasa Indonesia explanation; empty when high
+    lai_note: str = ""
+
+
+# ---------------------------------------------------------------------------
+# Confidence-gated result dataclass
+# ---------------------------------------------------------------------------
+
+@dataclass
+class BiasResult:
+    """Per-metric result with epistemic confidence level.
+
+    Attributes:
+        value:       Point estimate of the bias metric.
+        severity:    Severity label: "none" | "mild" | "moderate" | "severe".
+        confidence:  Data sufficiency level: "insufficient" | "low" | "medium" | "high".
+        note:        Human-readable Bahasa Indonesia explanation of confidence level.
+                     Empty string when confidence is "high".
+    """
+    value: float
+    severity: str
+    confidence: str
+    note: str = ""
+
+
+def confidence_gate(sample_n: int) -> str:
+    """Classify data sufficiency for DEI and LAI metrics.
+
+    Thresholds are calibrated for a 14-round session where 3 realized trades
+    is the minimum to distinguish true behavior from noise (Odean, 1998 guidance).
+
+    Args:
+        sample_n: Number of realized round-trip trades in the session.
+
+    Returns:
+        "insufficient"  — sample_n < 1: metric is structurally undefined.
+        "low"           — 1 ≤ sample_n < 3: metric computed but high variance.
+        "medium"        — 3 ≤ sample_n < 5: usable with caution.
+        "high"          — sample_n ≥ 5: full statistical confidence.
+    """
+    if sample_n < 1:
+        return "insufficient"
+    if sample_n < 3:
+        return "low"
+    if sample_n < 5:
+        return "medium"
+    return "high"
+
+
+_CONFIDENCE_NOTES_DEI: dict[str, str] = {
+    "insufficient": (
+        "Tidak ada perdagangan terealisasi dalam sesi ini. "
+        "Indeks Efek Disposisi (DEI) tidak dapat dihitung."
+    ),
+    "low": (
+        "Hanya terdapat sedikit perdagangan terealisasi. "
+        "DEI dihitung tetapi memiliki variansi tinggi."
+    ),
+    "medium": (
+        "Perdagangan terealisasi cukup untuk menghitung DEI, "
+        "namun interpretasi perlu dilakukan dengan hati-hati."
+    ),
+    "high": "",
+}
+
+_CONFIDENCE_NOTES_LAI: dict[str, str] = {
+    "insufficient": (
+        "Tidak ada perdagangan terealisasi. "
+        "LAI = 0.0 mencerminkan ketiadaan data, bukan ketiadaan aversi kerugian."
+    ),
+    "low": (
+        "Hanya sedikit perdagangan. "
+        "LAI mungkin tidak merepresentasikan pola perilaku yang sesungguhnya."
+    ),
+    "medium": (
+        "Jumlah perdagangan memadai untuk menghitung LAI, "
+        "namun lanjutkan interpretasi dengan hati-hati."
+    ),
+    "high": "",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -286,6 +369,96 @@ def compute_loss_aversion_index(features: SessionFeatures) -> float:
     return avg_losers / max(avg_winners, 1.0)
 
 
+def compute_disposition_effect_result(features: SessionFeatures) -> BiasResult:
+    """Compute DEI with confidence gating.
+
+    Wraps compute_disposition_effect() with a BiasResult that exposes the
+    epistemic confidence level based on realized trade count.
+
+    Returns:
+        BiasResult with value=DEI, severity, confidence level, and note.
+    """
+    from config import DEI_MILD, DEI_MODERATE, DEI_SEVERE, MIN_TRADES_FOR_FULL_SEVERITY
+
+    n = len(features.realized_trades)
+    confidence = confidence_gate(n)
+
+    if confidence == "insufficient":
+        return BiasResult(
+            value=0.0,
+            severity="none",
+            confidence="insufficient",
+            note=_CONFIDENCE_NOTES_DEI["insufficient"],
+        )
+
+    _, _, dei = compute_disposition_effect(features)
+    min_sample_met = n >= MIN_TRADES_FOR_FULL_SEVERITY
+    severity = classify_severity(
+        abs(dei), DEI_SEVERE, DEI_MODERATE, DEI_MILD,
+        min_sample_met=min_sample_met,
+    )
+
+    return BiasResult(
+        value=dei,
+        severity=severity,
+        confidence=confidence,
+        note=_CONFIDENCE_NOTES_DEI.get(confidence, ""),
+    )
+
+
+def compute_loss_aversion_index_result(features: SessionFeatures) -> BiasResult:
+    """Compute LAI with confidence gating, resolving the LAI=0.0 ambiguity.
+
+    LAI = 0.0 can mean:
+        (a) No realized trades at all  → confidence = "insufficient"
+        (b) Only winning trades sold   → confidence based on n, but note = "no loser signal"
+        (c) Genuine zero loss aversion → (rare; all trades held equal duration)
+
+    This function distinguishes (a) from (b)/(c) via confidence_gate().
+
+    Returns:
+        BiasResult with value=LAI, severity, confidence level, and note.
+    """
+    from config import LAI_MILD, LAI_MODERATE, LAI_SEVERE, MIN_TRADES_FOR_FULL_SEVERITY
+
+    n = len(features.realized_trades)
+    confidence = confidence_gate(n)
+
+    if confidence == "insufficient":
+        return BiasResult(
+            value=0.0,
+            severity="none",
+            confidence="insufficient",
+            note=_CONFIDENCE_NOTES_LAI["insufficient"],
+        )
+
+    lai = compute_loss_aversion_index(features)
+    min_sample_met = n >= MIN_TRADES_FOR_FULL_SEVERITY
+    severity = classify_severity(
+        lai, LAI_SEVERE, LAI_MODERATE, LAI_MILD,
+        min_sample_met=min_sample_met,
+    )
+
+    # Check for LAI=0 with trades present (case b: only winners sold)
+    loser_count = sum(1 for t in features.realized_trades if t["sell_price"] < t["buy_price"])
+    if lai == 0.0 and n > 0 and loser_count == 0:
+        extra_note = (
+            " Semua perdagangan terealisasi adalah keuntungan — "
+            "tidak ada sinyal aversi kerugian yang terdeteksi."
+        )
+    else:
+        extra_note = ""
+
+    note = _CONFIDENCE_NOTES_LAI.get(confidence, "") + extra_note
+
+    return BiasResult(
+        value=lai,
+        severity=severity,
+        confidence=confidence,
+        note=note.strip(),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Severity classifier
 # ---------------------------------------------------------------------------
@@ -444,6 +617,10 @@ def compute_bias_metrics_with_ci(
     ocs_severity = classify_severity(ocs, OCS_SEVERE, OCS_MODERATE, OCS_MILD)
     lai_severity = classify_severity(lai, LAI_SEVERE, LAI_MODERATE, LAI_MILD)
 
+    # Confidence gating
+    dei_result = compute_disposition_effect_result(session_features)
+    lai_result = compute_loss_aversion_index_result(session_features)
+
     n_realized = len(session_features.realized_trades)
     if n_realized < _MIN_TRADES_FOR_CI:
         logger.debug(
@@ -459,6 +636,10 @@ def compute_bias_metrics_with_ci(
             ocs_severity=ocs_severity,
             lai_severity=lai_severity,
             low_confidence=True,
+            dei_confidence=dei_result.confidence,
+            lai_confidence=lai_result.confidence,
+            dei_note=dei_result.note,
+            lai_note=lai_result.note,
         )
 
     rng = random.Random(0)
@@ -496,6 +677,10 @@ def compute_bias_metrics_with_ci(
         ocs_severity=ocs_severity,
         lai_severity=lai_severity,
         low_confidence=False,
+        dei_confidence=dei_result.confidence,
+        lai_confidence=lai_result.confidence,
+        dei_note=dei_result.note,
+        lai_note=lai_result.note,
     )
 
 
