@@ -36,6 +36,7 @@ from config import (
     LAI_MILD, LAI_MODERATE, LAI_SEVERE,
     OCS_MILD, OCS_MODERATE, OCS_SEVERE,
     ROUNDS_PER_SESSION,
+    USE_DOLLAR_WEIGHTED_DEI,
 )
 
 logger = logging.getLogger(__name__)
@@ -78,22 +79,89 @@ class BiasMetricsWithCI:
 
 
 # ---------------------------------------------------------------------------
-# Disposition Effect Index (DEI)  — Odean (1998)
+# Disposition Effect Index (DEI)  — Odean (1998) + Frazzini (2006) variant
 # ---------------------------------------------------------------------------
 
-def compute_disposition_effect(
+def _compute_dei_count_based(
     features: SessionFeatures,
 ) -> tuple[float, float, float]:
-    """Compute PGR, PLR, and DEI from session features.
-
-    DEI measures the tendency to sell winners too early and hold losers too long.
+    """Count-based DEI per Odean (1998) — each position has equal weight of 1.
 
     PGR = Realized_Gains / (Realized_Gains + Paper_Gains)
     PLR = Realized_Losses / (Realized_Losses + Paper_Losses)
     DEI = PGR - PLR
 
-    A positive DEI indicates the disposition effect (Odean, 1998).
-    DEI ∈ [−1, 1]; uninflated baseline is near 0.
+    Returns:
+        Tuple (pgr, plr, dei). Returns (0.0, 0.0, 0.0) if no trades exist.
+    """
+    realized_gains  = sum(1 for t in features.realized_trades if t["sell_price"] > t["buy_price"])
+    realized_losses = sum(1 for t in features.realized_trades if t["sell_price"] < t["buy_price"])
+    paper_gains     = sum(1 for p in features.open_positions if p["final_price"] > p["avg_price"])
+    paper_losses    = sum(1 for p in features.open_positions if p["final_price"] < p["avg_price"])
+
+    pgr_denom = realized_gains + paper_gains
+    plr_denom = realized_losses + paper_losses
+
+    pgr = realized_gains / pgr_denom if pgr_denom > 0 else 0.0
+    plr = realized_losses / plr_denom if plr_denom > 0 else 0.0
+    return pgr, plr, pgr - plr
+
+
+def _compute_dei_dollar_weighted(
+    features: SessionFeatures,
+) -> tuple[float, float, float]:
+    """Dollar-weighted DEI per Frazzini (2006) — positions weighted by trade value.
+
+    Weight for realized trades:  quantity × |sell_price − buy_price|
+    Weight for paper positions:  quantity × |final_price − avg_price|
+
+    PGR = Σ weight(realized gains) / (Σ weight(realized gains) + Σ weight(paper gains))
+    PLR = Σ weight(realized losses) / (Σ weight(realized losses) + Σ weight(paper losses))
+    DEI = PGR − PLR
+
+    Falls back to (0.0, 0.0, 0.0) if total weight is zero (no price movement data).
+
+    Reference:
+        Frazzini, A. (2006). The disposition effect and underreaction to news.
+        Journal of Finance, 61(4), 2017–2046. https://doi.org/10.1111/j.1540-6261.2006.00896.x
+
+    Returns:
+        Tuple (pgr, plr, dei). Returns (0.0, 0.0, 0.0) if no trades or zero weights.
+    """
+    def _w(qty: float, p1: float, p2: float) -> float:
+        """Dollar weight = quantity × absolute price movement."""
+        return qty * abs(p1 - p2)
+
+    rg_w = sum(_w(t["quantity"], t["sell_price"], t["buy_price"])
+               for t in features.realized_trades if t["sell_price"] > t["buy_price"])
+    rl_w = sum(_w(t["quantity"], t["sell_price"], t["buy_price"])
+               for t in features.realized_trades if t["sell_price"] < t["buy_price"])
+    pg_w = sum(_w(p["quantity"], p["final_price"], p["avg_price"])
+               for p in features.open_positions if p["final_price"] > p["avg_price"])
+    pl_w = sum(_w(p["quantity"], p["final_price"], p["avg_price"])
+               for p in features.open_positions if p["final_price"] < p["avg_price"])
+
+    pgr_denom = rg_w + pg_w
+    plr_denom = rl_w + pl_w
+
+    pgr = rg_w / pgr_denom if pgr_denom > 0 else 0.0
+    plr = rl_w / plr_denom if plr_denom > 0 else 0.0
+
+    logger.debug(
+        "DEI dollar-weighted: rg_w=%.2f rl_w=%.2f pg_w=%.2f pl_w=%.2f pgr=%.4f plr=%.4f",
+        rg_w, rl_w, pg_w, pl_w, pgr, plr,
+    )
+    return pgr, plr, pgr - plr
+
+
+def compute_disposition_effect(
+    features: SessionFeatures,
+) -> tuple[float, float, float]:
+    """Dispatcher: compute PGR, PLR, and DEI using the configured variant.
+
+    Reads USE_DOLLAR_WEIGHTED_DEI from config to select:
+        True  → dollar-weighted DEI (Frazzini, 2006) — production default
+        False → count-based DEI (Odean, 1998) — preserved for regression testing
 
     Args:
         features: Extracted session features.
@@ -101,35 +169,12 @@ def compute_disposition_effect(
     Returns:
         Tuple (pgr, plr, dei). Returns (0.0, 0.0, 0.0) if no trades exist.
     """
-    realized_gains = sum(
-        1
-        for t in features.realized_trades
-        if t["sell_price"] > t["buy_price"]
-    )
-    realized_losses = sum(
-        1
-        for t in features.realized_trades
-        if t["sell_price"] < t["buy_price"]
-    )
-    paper_gains = sum(
-        1
-        for p in features.open_positions
-        if p["final_price"] > p["avg_price"]
-    )
-    paper_losses = sum(
-        1
-        for p in features.open_positions
-        if p["final_price"] < p["avg_price"]
-    )
-
-    pgr_denom = realized_gains + paper_gains
-    plr_denom = realized_losses + paper_losses
-
-    pgr = realized_gains / pgr_denom if pgr_denom > 0 else 0.0
-    plr = realized_losses / plr_denom if plr_denom > 0 else 0.0
-    dei = pgr - plr
-
-    return pgr, plr, dei
+    if USE_DOLLAR_WEIGHTED_DEI:
+        logger.debug("DEI: using dollar-weighted variant (Frazzini 2006)")
+        return _compute_dei_dollar_weighted(features)
+    else:
+        logger.debug("DEI: using count-based variant (Odean 1998)")
+        return _compute_dei_count_based(features)
 
 
 # ---------------------------------------------------------------------------
