@@ -83,40 +83,71 @@ def _init_session_state() -> None:
 # Sidebar — navigation + user info
 # ---------------------------------------------------------------------------
 def _sidebar() -> str:
-    """Render the sidebar and return the selected page name."""
+    """Render sidebar navigation and return the active page name."""
     with st.sidebar:
         st.title("📊 CDT Investasi")
         st.caption("Cognitive Digital Twin\nDeteksi Bias Perilaku")
 
+        st.divider()
+
+        user_logged_in = bool(st.session_state.get("user_id"))
+        has_sessions = False
+        if user_logged_in:
+            # Check if user has at least 1 completed session (for Analitik/Profil unlock)
+            from database.models import BiasMetric
+            with get_session() as sess:
+                has_sessions = sess.query(BiasMetric).filter_by(
+                    user_id=st.session_state["user_id"]
+                ).first() is not None
+
+        current = st.session_state["current_page"]
+
         pages = [
-            "Informasi & Persetujuan",
-            "Beranda",
-            "Simulasi Investasi",
-            "Hasil Analisis & Umpan Balik",
-            "Profil Kognitif Saya",
+            ("Informasi & Persetujuan", True),           # always visible
+            ("Beranda", True),                            # always visible
+            ("Simulasi Investasi", user_logged_in),       # requires login
+            ("Hasil Analisis & Umpan Balik", has_sessions),  # requires >=1 session
+            ("Profil Kognitif Saya", has_sessions),       # requires >=1 session
         ]
 
-        selected = st.radio(
-            "Navigasi",
-            options=pages,
-            index=pages.index(st.session_state["current_page"]),
-            key="_nav_radio",
-        )
-        st.session_state["current_page"] = selected
+        for page_name, enabled in pages:
+            if enabled:
+                is_active = current == page_name
+                label = f"**{page_name}**" if is_active else page_name
+                if st.button(label, key=f"nav_{page_name}", use_container_width=True):
+                    st.session_state["current_page"] = page_name
+                    st.rerun()
+            else:
+                st.caption(f"🔒 {page_name}")
 
         st.divider()
+
         if st.session_state.get("user_alias"):
             st.markdown(f"**Pengguna:** {st.session_state['user_alias']}")
             st.caption(
-                f"Tingkat: {st.session_state.get('experience_level', '—').capitalize()}"
+                f"Tingkat: "
+                f"{st.session_state.get('experience_level', '—').capitalize()}"
             )
+            # LOGOUT-01
+            if st.button("⏻ Keluar", key="nav_logout", use_container_width=True):
+                for key in [
+                    "user_id", "user_alias", "experience_level",
+                    "consent_given", "show_survey", "onboarding_shown",
+                    "last_session_id",
+                ]:
+                    st.session_state.pop(key, None)
+                for key in list(st.session_state.keys()):
+                    if key.startswith("sim_"):
+                        st.session_state.pop(key, None)
+                st.session_state["current_page"] = "Informasi & Persetujuan"
+                st.rerun()
         else:
             st.caption("Belum login")
 
         st.divider()
         st.caption("Thesis ITB • CDT Framework")
 
-    return selected
+    return st.session_state["current_page"]
 
 
 # ---------------------------------------------------------------------------
@@ -145,7 +176,7 @@ def _page_consent() -> None:
 
             ## Apa yang Akan Kamu Lakukan?
 
-            Kamu akan diminta untuk menyelesaikan **1–3 sesi simulasi investasi** menggunakan
+            Kamu akan diminta untuk menyelesaikan **minimum 3 sesi simulasi investasi** menggunakan
             data historis saham IDX. Setiap sesi terdiri dari 14 putaran di mana kamu memutuskan
             untuk membeli, menjual, atau menahan 12 saham IDX pilihan. Setelah setiap sesi, sistem
             akan menganalisis pola keputusanmu dan memberikan umpan balik personal.
@@ -374,65 +405,58 @@ def _page_beranda() -> None:
                 st.session_state["current_page"] = "Simulasi Investasi"
                 st.rerun()
 
-        # --- Optional Risk Preference Survey ---
+        # --- Mandatory Profil Investor Survey for new users ---
         if st.session_state.get("show_survey") and st.session_state.get("user_id"):
             st.divider()
-            with st.expander("📋 Isi Survei Preferensi Risiko (Opsional)", expanded=True):
-                st.caption(
-                    "Survei ini membantu peneliti membandingkan preferensi yang Anda "
-                    "nyatakan dengan perilaku aktual di simulasi. Data tidak memengaruhi "
-                    "simulasi atau skor Anda. Anda dapat melewati survei ini."
+            st.subheader("Profil Investor — Survei Awal")
+            st.caption(
+                "Sebelum memulai simulasi, isi survei singkat ini (~2 menit). "
+                "Data ini membantu kalibrasi profil awal Cognitive Digital Twin-mu "
+                "dan digunakan untuk keperluan penelitian. Wajib diisi sekali."
+            )
+
+            LIKERT_LABELS = {
+                1: "1 — Sangat Tidak Setuju",
+                2: "2 — Tidak Setuju",
+                3: "3 — Netral",
+                4: "4 — Setuju",
+                5: "5 — Sangat Setuju",
+            }
+
+            with st.form("survey_form"):
+                q1 = st.select_slider(
+                    "Saya bersedia mengambil risiko tinggi demi potensi keuntungan besar.",
+                    options=[1, 2, 3, 4, 5], value=3,
+                    format_func=lambda x: LIKERT_LABELS[x],
+                )
+                q2 = st.select_slider(
+                    "Saya merasa sangat terganggu ketika investasi saya mengalami kerugian sementara.",
+                    options=[1, 2, 3, 4, 5], value=3,
+                    format_func=lambda x: LIKERT_LABELS[x],
+                )
+                q3 = st.select_slider(
+                    "Saya merasa perlu sering melakukan transaksi untuk mendapatkan hasil optimal.",
+                    options=[1, 2, 3, 4, 5], value=3,
+                    format_func=lambda x: LIKERT_LABELS[x],
+                )
+                q4 = st.select_slider(
+                    "Ketika harga saham turun, saya cenderung menahan saham tersebut daripada menjualnya.",
+                    options=[1, 2, 3, 4, 5], value=3,
+                    format_func=lambda x: LIKERT_LABELS[x],
+                )
+                survey_submitted = st.form_submit_button(
+                    "Simpan & Mulai Simulasi",
+                    use_container_width=True,
+                    type="primary",
                 )
 
-                LIKERT_LABELS = {
-                    1: "1 — Sangat Tidak Setuju",
-                    2: "2 — Tidak Setuju",
-                    3: "3 — Netral",
-                    4: "4 — Setuju",
-                    5: "5 — Sangat Setuju",
-                }
-
-                with st.form("survey_form"):
-                    q1 = st.select_slider(
-                        "Saya bersedia mengambil risiko tinggi demi potensi keuntungan besar.",
-                        options=[1, 2, 3, 4, 5],
-                        value=3,
-                        format_func=lambda x: LIKERT_LABELS[x],
-                    )
-                    q2 = st.select_slider(
-                        "Saya merasa sangat terganggu ketika investasi saya mengalami kerugian sementara.",
-                        options=[1, 2, 3, 4, 5],
-                        value=3,
-                        format_func=lambda x: LIKERT_LABELS[x],
-                    )
-                    q3 = st.select_slider(
-                        "Saya merasa perlu sering melakukan transaksi untuk mendapatkan hasil optimal.",
-                        options=[1, 2, 3, 4, 5],
-                        value=3,
-                        format_func=lambda x: LIKERT_LABELS[x],
-                    )
-                    q4 = st.select_slider(
-                        "Ketika harga saham turun, saya cenderung menahan saham tersebut daripada menjualnya.",
-                        options=[1, 2, 3, 4, 5],
-                        value=3,
-                        format_func=lambda x: LIKERT_LABELS[x],
-                    )
-
-                    col_submit, col_skip = st.columns(2)
-                    with col_submit:
-                        survey_submitted = st.form_submit_button(
-                            "Simpan Survei", use_container_width=True, type="primary"
-                        )
-                    with col_skip:
-                        survey_skipped = st.form_submit_button(
-                            "Lewati →", use_container_width=True
-                        )
-
-                if survey_submitted:
-                    uid = st.session_state["user_id"]
-                    try:
-                        from database.models import UserSurvey
-                        with get_session() as survey_sess:
+            if survey_submitted:
+                uid = st.session_state["user_id"]
+                try:
+                    from database.models import UserSurvey
+                    with get_session() as survey_sess:
+                        existing = survey_sess.query(UserSurvey).filter_by(user_id=uid).first()
+                        if not existing:
                             survey_sess.add(UserSurvey(
                                 user_id=uid,
                                 q_risk_tolerance=q1,
@@ -440,18 +464,12 @@ def _page_beranda() -> None:
                                 q_trading_frequency=q3,
                                 q_holding_behavior=q4,
                             ))
-                        st.success("Survei berhasil disimpan. Terima kasih!")
-                    except Exception:
-                        logger.warning("Failed to save survey for user %d", uid)
-
-                    st.session_state["show_survey"] = False
-                    st.session_state["current_page"] = "Simulasi Investasi"
-                    st.rerun()
-
-                if survey_skipped:
-                    st.session_state["show_survey"] = False
-                    st.session_state["current_page"] = "Simulasi Investasi"
-                    st.rerun()
+                    st.success("Survei berhasil disimpan. Terima kasih!")
+                except Exception:
+                    logger.warning("Failed to save survey for user %d", uid)
+                st.session_state["show_survey"] = False
+                st.session_state["current_page"] = "Simulasi Investasi"
+                st.rerun()
 
 
 # ---------------------------------------------------------------------------
@@ -904,6 +922,90 @@ def _page_hasil() -> None:
         return
 
     render_feedback_page(user_id=user_id, session_id=session_id)
+
+    # --- PostSessionSurvey: optional reflection ---
+    from database.models import PostSessionSurvey
+    try:
+        with get_session() as check_sess:
+            already_submitted = check_sess.query(PostSessionSurvey).filter_by(
+                user_id=user_id, session_id=session_id
+            ).first() is not None
+    except Exception:
+        already_submitted = True  # fail-safe: skip on error
+
+    if already_submitted:
+        return
+
+    st.divider()
+    with st.expander("Refleksi Sesi — Opsional (~1 menit)", expanded=False):
+        st.caption(
+            "Setelah melihat hasil di atas, isi refleksi singkat ini. "
+            "Data ini membantu peneliti memahami kesadaran diri investor. Bisa dilewati."
+        )
+
+        LIKERT_LABELS = {1: "1", 2: "2", 3: "3", 4: "4", 5: "5"}
+
+        with st.form("post_session_survey_form"):
+            st.markdown("**Seberapa sadar kamu terhadap bias berikut selama sesi ini?**")
+            st.caption("1 = Tidak sadar sama sekali | 5 = Sangat sadar")
+            ps_oc = st.select_slider(
+                "Overconfidence (terlalu percaya diri, trading terlalu sering)",
+                options=[1, 2, 3, 4, 5], value=3,
+                format_func=lambda x: LIKERT_LABELS[x],
+            )
+            ps_dei = st.select_slider(
+                "Efek Disposisi (jual untung cepat, tahan rugi lama)",
+                options=[1, 2, 3, 4, 5], value=3,
+                format_func=lambda x: LIKERT_LABELS[x],
+            )
+            ps_la = st.select_slider(
+                "Loss Aversion (takut rugi lebih dari senang untung)",
+                options=[1, 2, 3, 4, 5], value=3,
+                format_func=lambda x: LIKERT_LABELS[x],
+            )
+            ps_useful = st.select_slider(
+                "Seberapa berguna umpan balik yang kamu terima?",
+                options=[1, 2, 3, 4, 5], value=3,
+                format_func=lambda x: {
+                    1: "1 — Tidak berguna",
+                    2: "2 — Kurang berguna",
+                    3: "3 — Cukup berguna",
+                    4: "4 — Berguna",
+                    5: "5 — Sangat berguna",
+                }[x],
+            )
+
+            col_save, col_skip = st.columns(2)
+            with col_save:
+                ps_submitted = st.form_submit_button(
+                    "Simpan Refleksi", use_container_width=True, type="primary"
+                )
+            with col_skip:
+                ps_skipped = st.form_submit_button(
+                    "Lewati", use_container_width=True
+                )
+
+        if ps_submitted:
+            try:
+                with get_session() as ps_sess:
+                    ps_sess.add(PostSessionSurvey(
+                        user_id=user_id,
+                        session_id=session_id,
+                        self_overconfidence=ps_oc,
+                        self_disposition=ps_dei,
+                        self_loss_aversion=ps_la,
+                        feedback_usefulness=ps_useful,
+                    ))
+                st.success("Refleksi berhasil disimpan. Terima kasih!")
+            except Exception:
+                logger.warning(
+                    "Failed to save PostSessionSurvey user=%d session=%s",
+                    user_id, session_id
+                )
+            st.rerun()
+
+        if ps_skipped:
+            st.rerun()
 
 
 # ---------------------------------------------------------------------------

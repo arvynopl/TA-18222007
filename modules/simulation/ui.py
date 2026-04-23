@@ -114,8 +114,7 @@ def _build_full_chart(
         ), row=2, col=1)
 
     # --- Trading window up to current_round (candlestick) ---
-    # Show at least 2 bars on round 1 to avoid single-bar Plotly rendering artifact.
-    display_count = max(current_round, 2) if len(window_data) >= 2 else current_round
+    display_count = current_round
     visible = window_data[:display_count]
     if visible:
         win_dates = [
@@ -132,6 +131,18 @@ def _build_full_chart(
             increasing_line_color=COLOR_GAIN,
             decreasing_line_color=COLOR_LOSS,
         ), row=1, col=1)
+
+        # Plotly single-candle workaround: invisible scatter anchor prevents x-axis collapse
+        if display_count == 1 and visible:
+            fig.add_trace(go.Scatter(
+                x=[win_dates[0]],
+                y=[visible[0]["close"]],
+                mode="markers",
+                marker=dict(size=0, opacity=0, color="rgba(0,0,0,0)"),
+                showlegend=False,
+                hoverinfo="skip",
+                name="_anchor",
+            ), row=1, col=1)
 
         # MA overlays for trading window
         ma5_vals = [d.get("ma_5") for d in visible]
@@ -189,6 +200,16 @@ def _build_full_chart(
             )
 
     apply_chart_theme(fig, height=420)
+    fig.update_layout(
+        legend=dict(
+            x=0,
+            y=1.18,
+            orientation="h",
+            bgcolor="rgba(0,0,0,0)",
+            font=dict(size=10),
+        )
+    )
+    fig.update_xaxes(rangeslider_visible=False)
     fig.update_yaxes(title_text="Harga (Rp)", row=1, col=1, gridcolor="rgba(255,255,255,0.08)")
     fig.update_yaxes(title_text="Volume", row=2, col=1, gridcolor="rgba(255,255,255,0.08)")
     fig.update_xaxes(type="category", gridcolor="rgba(255,255,255,0.08)")
@@ -551,6 +572,15 @@ def render_simulation_page() -> None:
     )
 
     round_data = {sid: window[sid][current_round - 1] for sid in stock_ids}
+
+    # BALANCE-01: deduct pending buy orders from displayed/usable cash
+    pending_buy_cost = sum(
+        order["quantity"] * round_data[sid]["close"]
+        for sid, order in pending.items()
+        if order.get("action_type") == "Beli" and sid in round_data
+    )
+    available_cash = portfolio.cash - pending_buy_cost
+
     current_prices = {sid: round_data[sid]["close"] for sid in stock_ids}
     total_value = portfolio.get_total_value(current_prices)
     delta = total_value - INITIAL_CAPITAL
@@ -570,9 +600,17 @@ def render_simulation_page() -> None:
     )
     c_cash.metric(
         "Kas Tersedia",
-        _format_rupiah(portfolio.cash),
-        delta=f"{portfolio.cash - INITIAL_CAPITAL:+,.0f}" if portfolio.cash != INITIAL_CAPITAL else " ",
+        _format_rupiah(available_cash),
+        delta=(
+            f"Antrean beli: -{_format_rupiah(pending_buy_cost)}"
+            if pending_buy_cost > 0 else " "
+        ),
         delta_color="off",
+        help=(
+            f"Kas setelah dikurangi antrean beli aktif ({_format_rupiah(pending_buy_cost)})."
+            if pending_buy_cost > 0 else
+            "Kas tunai yang tersedia untuk pembelian saham."
+        ),
     )
     c_rpnl.metric(
         "Realized P&L",
@@ -653,10 +691,13 @@ def render_simulation_page() -> None:
             st.divider()
             st.markdown("**Keputusan Putaran Ini:**")
             for sid, order in pending.items():
-                ticker = sid.split(".")[0]
-                st.caption(
-                    f"**{ticker}**: {order['action_type']} {order['quantity']} lbr"
-                )
+                ticker_label = sid.split(".")[0]
+                if order["action_type"] == "Tahan":
+                    st.caption(f"-- **{ticker_label}**: Tahan")
+                else:
+                    st.caption(
+                        f"**{ticker_label}**: {order['action_type']} {order['quantity']} lbr"
+                    )
 
     with col_right:
         sid = selected_stock
@@ -757,7 +798,7 @@ def render_simulation_page() -> None:
 
             quantity = 0
             if action_type == "Beli":
-                max_buy = int(portfolio.cash // snap["close"]) if snap["close"] > 0 else 0
+                max_buy = int(available_cash // snap["close"]) if snap["close"] > 0 else 0
                 default_qty = existing_order.get("quantity", 0) if existing_order.get("action_type") == "Beli" else 0
                 quantity = st.number_input(
                     "Jumlah lembar",
@@ -793,17 +834,21 @@ def render_simulation_page() -> None:
                         + (f", Sisa = {remaining_qty} lbr" if remaining_qty > 0 else ", Posisi ditutup")
                     )
 
-            order_submitted = st.form_submit_button(
-                f"➕ Tambahkan ke Antrean: {action_type} {ticker}",
-                use_container_width=True,
+            btn_label = (
+                f"Konfirmasi: Tahan {ticker}"
+                if action_type == "Tahan"
+                else f"Tambahkan ke Antrean: {action_type} {ticker}"
             )
+            order_submitted = st.form_submit_button(btn_label, use_container_width=True)
 
         if order_submitted:
-            if action_type != "Tahan" and quantity > 0:
-                pending[sid] = {"action_type": action_type, "quantity": quantity}
-            elif sid in pending:
-                # User switched back to Tahan — remove pending order
-                del pending[sid]
+            if action_type == "Beli" and quantity > 0:
+                pending[sid] = {"action_type": "Beli", "quantity": quantity}
+            elif action_type == "Jual" and quantity > 0:
+                pending[sid] = {"action_type": "Jual", "quantity": quantity}
+            else:
+                # Explicit Tahan confirmation (or Beli/Jual with qty=0 falls back to Tahan)
+                pending[sid] = {"action_type": "Tahan", "quantity": 0}
             st.session_state["sim_pending_orders"] = pending
             st.rerun()
 
