@@ -203,7 +203,7 @@ def generate_tldr_summary(bias_results: dict) -> str:
     return _SUMMARIES[best_key][severity]
 
 _INTERACTION_THRESHOLD = 0.65  # Strong coupling threshold (Cohen 1988)
-_MIN_SESSIONS_FOR_INTERACTION = 5
+_MIN_SESSIONS_FOR_INTERACTION = 3   # FIXED: align with interaction.py minimum (was 5, caused UAT suppression)
 
 _BIAS_METRIC_KEY: dict[str, str] = {
     "overconfidence": "overconfidence_score",
