@@ -96,9 +96,9 @@ class _FakeProfile:
 
 
 def test_interaction_modifier_returns_empty_below_session_threshold():
-    """Fewer than 5 sessions → no insights regardless of correlation."""
+    """Fewer than 3 sessions → no insights regardless of correlation."""
     profile = _FakeProfile(
-        session_count=4,
+        session_count=2,
         interaction_scores={"ocs_dei": 0.9, "ocs_lai": 0.8, "dei_lai": 0.7},
     )
     result = _get_interaction_modifier(profile)

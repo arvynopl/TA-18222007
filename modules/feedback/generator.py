@@ -603,10 +603,24 @@ def generate_feedback(
 
         # When DEI or LAI data is insufficient, downgrade severity to "none"
         # so the feedback template does not mischaracterize the user's behavior.
-        if cfg["bias_type"] == "disposition_effect" and dei_result.confidence == "insufficient":
+        # Only override when BiasMetric itself also shows no evidence of trades
+        # (guards against the case where realized_trades is not passed but
+        # the BiasMetric was computed from real data in the DB).
+        _bias_pgr = bias_metric.disposition_pgr or 0.0
+        _bias_plr = bias_metric.disposition_plr or 0.0
+        _bias_dei = abs(bias_metric.disposition_dei or 0.0)
+        _bias_has_trade_evidence = _bias_pgr > 1e-9 or _bias_plr > 1e-9 or _bias_dei > 1e-9
+        _bias_lai = bias_metric.loss_aversion_index or 0.0
+
+        if (cfg["bias_type"] == "disposition_effect"
+                and dei_result.confidence == "insufficient"
+                and not _bias_has_trade_evidence):
             severity = "none"
             logger.debug("generate_feedback: DEI confidence=insufficient → severity forced to none")
-        if cfg["bias_type"] == "loss_aversion" and lai_result.confidence == "insufficient":
+        if (cfg["bias_type"] == "loss_aversion"
+                and lai_result.confidence == "insufficient"
+                and not _bias_has_trade_evidence
+                and _bias_lai < 1e-9):
             severity = "none"
             logger.debug("generate_feedback: LAI confidence=insufficient → severity forced to none")
 
