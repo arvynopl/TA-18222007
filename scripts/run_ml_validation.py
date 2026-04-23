@@ -190,7 +190,7 @@ def generate_synthetic_data() -> tuple[list[list[float]], list[str], list[str]]:
 # Database loading
 # ---------------------------------------------------------------------------
 
-def load_from_database() -> tuple[list[list[float]], list[str]]:
+def load_from_database() -> tuple[list[list[float]], list[str], list]:
     """Load all BiasMetric records and build the feature matrix.
 
     Calls ``build_feature_matrix()`` from ml_validator.py which internally
@@ -198,8 +198,8 @@ def load_from_database() -> tuple[list[list[float]], list[str]]:
     behavioural data (trade frequency, hold ratio, etc.).
 
     Returns:
-        ``(X, y)`` — feature matrix and severity labels.
-        Returns ``([], [])`` on any DB error or if the table is empty.
+        ``(X, y, metrics)`` — feature matrix, severity labels, and raw BiasMetric objects.
+        Returns ``([], [], [])`` on any DB error or if the table is empty.
     """
     try:
         init_db()
@@ -207,13 +207,13 @@ def load_from_database() -> tuple[list[list[float]], list[str]]:
             metrics = db.query(BiasMetric).all()
             if not metrics:
                 logger.info("No BiasMetric records found in the database.")
-                return [], []
+                return [], [], []
             X, y, _ = build_feature_matrix(db, metrics)
             logger.info("Loaded %d BiasMetric records from database.", len(X))
-            return X, y
+            return X, y, metrics
     except Exception as exc:
         logger.warning("Database load failed (%s) — will use synthetic data only.", exc)
-        return [], []
+        return [], [], []
 
 
 # ---------------------------------------------------------------------------
@@ -549,7 +549,7 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Step 1: Load real data from database
     # ------------------------------------------------------------------
-    db_X, db_y = load_from_database()
+    db_X, db_y, real_metrics = load_from_database()
     n_db_records = len(db_X)
 
     # ------------------------------------------------------------------
@@ -616,6 +616,65 @@ def main() -> None:
     logger.info("  %s", dt_path.relative_to(_REPO_ROOT))
     logger.info("  %s", cr_path.relative_to(_REPO_ROOT))
     logger.info("  %s", sum_path.relative_to(_REPO_ROOT))
+
+    # ── Post-UAT: per-bias classifiers ───────────────────────────────────────
+    POST_UAT_MODE = n_db_records >= MIN_REAL_RECORDS
+
+    if POST_UAT_MODE:
+        print(f"\n[POST-UAT] {n_db_records} real records found — running per-bias classifiers.")
+        from modules.cdt.ml_validator import train_per_bias_classifiers, derive_per_bias_labels
+        from database.db import get_session as _get_session
+
+        with _get_session() as _db:
+            y_ocs, y_dei, y_lai = derive_per_bias_labels(_db, real_metrics)
+        per_bias_results = train_per_bias_classifiers(db_X, y_ocs, y_dei, y_lai)
+
+        if per_bias_results:
+            for bias_key, res in per_bias_results.items():
+                print(f"  [{bias_key.upper()}] accuracy={res['accuracy']:.3f}  "
+                      f"n={res['n_samples']}  classes={list(res['class_counts'].keys())}")
+                import json
+                out = {
+                    "bias":            bias_key,
+                    "accuracy":        res["accuracy"],
+                    "n_samples":       res["n_samples"],
+                    "class_counts":    res["class_counts"],
+                    "report":          res["report"],
+                    "feature_names":   res["feature_names"],
+                }
+                report_path = REPORTS_DIR / f"per_bias_{bias_key}_summary.json"
+                report_path.write_text(json.dumps(out, indent=2, ensure_ascii=False))
+                print(f"  → Saved to {report_path}")
+    else:
+        print(f"\n[POST-UAT GATED] Only {n_db_records} real records "
+              f"(minimum: {MIN_REAL_RECORDS}). Skipping per-bias classifiers.")
+        print("   Re-run this script after UAT data collection is complete.")
+
+    # ── Post-UAT: stratified k-fold cross-validation ─────────────────────────
+    if POST_UAT_MODE:
+        from sklearn.tree import DecisionTreeClassifier
+        from modules.cdt.ml_validator import run_kfold_validation
+
+        clf_template = DecisionTreeClassifier(
+            max_depth=4,
+            criterion="gini",
+            class_weight="balanced",
+            min_samples_leaf=2,
+            random_state=42,
+        )
+
+        print(f"\n[POST-UAT] Running stratified 5-fold CV on combined severity labels.")
+        kfold_result = run_kfold_validation(clf_template, X, y, k=5)
+
+        if kfold_result:
+            print(f"  K-fold CV: mean_accuracy={kfold_result['mean_accuracy']:.3f} "
+                  f"± {kfold_result['std_accuracy']:.3f}")
+            print(f"  Fold accuracies: {[f'{a:.3f}' for a in kfold_result['fold_accuracies']]}")
+
+            import json
+            kfold_path = REPORTS_DIR / "kfold_summary.json"
+            kfold_path.write_text(json.dumps(kfold_result, indent=2))
+            print(f"  → Saved to {kfold_path}")
 
 
 if __name__ == "__main__":

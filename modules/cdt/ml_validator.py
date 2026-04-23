@@ -385,3 +385,179 @@ def train_bias_classifier(X: list, y: list) -> Optional[dict]:
         "class_counts": class_counts,
         "n_samples": len(y),
     }
+
+
+def train_per_bias_classifiers(
+    X: list,
+    y_ocs: list[str],
+    y_dei: list[str],
+    y_lai: list[str],
+) -> Optional[dict]:
+    """Train three separate DecisionTreeClassifiers, one per bias dimension.
+
+    Motivation: A single "worst-case severity" classifier conflates the three
+    bias dimensions, masking which features specifically predict OCS vs DEI vs
+    LAI. Separate classifiers expose per-bias feature importance for thesis
+    Chapter VI analysis.
+
+    Args:
+        X:      Feature matrix (n_samples × 17), same layout as build_feature_matrix().
+        y_ocs:  OCS severity labels per sample ("none"/"mild"/"moderate"/"severe").
+        y_dei:  DEI severity labels per sample.
+        y_lai:  LAI severity labels per sample.
+
+    Returns:
+        Dict keyed by bias name ("ocs", "dei", "lai"), each containing the
+        output dict from train_bias_classifier() (classifier, accuracy, report,
+        feature_names, etc.), or None if scikit-learn is unavailable or sample
+        count < 4.
+    """
+    try:
+        import numpy as np
+        from sklearn.metrics import classification_report
+        from sklearn.tree import DecisionTreeClassifier
+    except ImportError:
+        logger.warning("scikit-learn not installed — per-bias classifiers unavailable.")
+        return None
+
+    if len(X) < 4:
+        logger.warning("train_per_bias_classifiers: %d samples < 4, skipping.", len(X))
+        return None
+
+    X_arr = np.array(X, dtype=float)
+    results = {}
+
+    for bias_key, y_labels in [("ocs", y_ocs), ("dei", y_dei), ("lai", y_lai)]:
+        clf = DecisionTreeClassifier(
+            max_depth=4,
+            criterion="gini",
+            class_weight="balanced",
+            min_samples_leaf=2,
+            random_state=42,
+        )
+        clf.fit(X_arr, y_labels)
+        y_pred = clf.predict(X_arr).tolist()
+        accuracy = sum(a == b for a, b in zip(y_labels, y_pred)) / len(y_labels)
+        labels_present = sorted(set(y_labels), key=lambda s: SEVERITY_ORDER.get(s, 99))
+        report_dict = classification_report(
+            y_labels, y_pred,
+            labels=labels_present,
+            output_dict=True,
+            zero_division=0,
+        )
+        class_counts = {lbl: y_labels.count(lbl) for lbl in set(y_labels)}
+
+        logger.info(
+            "Per-bias classifier [%s]: n=%d accuracy=%.3f classes=%s",
+            bias_key, len(y_labels), accuracy, labels_present,
+        )
+        results[bias_key] = {
+            "classifier":     clf,
+            "feature_names":  DECISION_TREE_FEATURE_NAMES,
+            "y_pred":         y_pred,
+            "accuracy":       accuracy,
+            "report":         report_dict,
+            "class_counts":   class_counts,
+            "n_samples":      len(y_labels),
+        }
+
+    return results
+
+
+def derive_per_bias_labels(
+    db_session: Session, metrics: list
+) -> tuple[list[str], list[str], list[str]]:
+    """Derive per-bias severity labels for each BiasMetric record.
+
+    Unlike derive_worst_severity() which returns the single worst label,
+    this returns three parallel lists — one per bias dimension — for use
+    with train_per_bias_classifiers().
+
+    Returns:
+        Tuple (y_ocs, y_dei, y_lai): three lists of severity strings.
+    """
+    from config import (
+        DEI_MILD, DEI_MODERATE, DEI_SEVERE,
+        LAI_MILD, LAI_MODERATE, LAI_SEVERE,
+        OCS_MILD, OCS_MODERATE, OCS_SEVERE,
+    )
+    from modules.analytics.bias_metrics import classify_severity
+
+    y_ocs, y_dei, y_lai = [], [], []
+    for m in metrics:
+        ocs = m.overconfidence_score or 0.0
+        dei = abs(m.disposition_dei or 0.0)
+        lai = m.loss_aversion_index or 0.0
+
+        y_ocs.append(classify_severity(ocs, OCS_SEVERE, OCS_MODERATE, OCS_MILD))
+        y_dei.append(classify_severity(dei, DEI_SEVERE, DEI_MODERATE, DEI_MILD))
+        y_lai.append(classify_severity(lai, LAI_SEVERE, LAI_MODERATE, LAI_MILD))
+
+    return y_ocs, y_dei, y_lai
+
+
+def run_kfold_validation(
+    clf_template,
+    X: list,
+    y: list[str],
+    k: int = 5,
+) -> Optional[dict]:
+    """Run stratified k-fold cross-validation on a DecisionTreeClassifier.
+
+    Stratified split ensures each fold preserves the class distribution,
+    which is critical for imbalanced severity labels (many "moderate", few "severe").
+
+    Args:
+        clf_template: An unfitted DecisionTreeClassifier (used as template; cloned per fold).
+        X:            Feature matrix (n_samples × n_features).
+        y:            Severity labels (list[str]).
+        k:            Number of folds (default: 5).
+
+    Returns:
+        Dict with keys:
+            "mean_accuracy":  float — mean accuracy across all folds.
+            "std_accuracy":   float — standard deviation of fold accuracies.
+            "fold_accuracies": list[float] — per-fold accuracy values.
+            "n_folds":        int — actual number of folds used (may be < k if
+                              class count < k).
+        Returns None if scikit-learn is unavailable or sample count < k.
+    """
+    try:
+        import numpy as np
+        from sklearn.model_selection import StratifiedKFold
+        from sklearn.base import clone
+    except ImportError:
+        logger.warning("scikit-learn not installed — k-fold validation unavailable.")
+        return None
+
+    if len(X) < k:
+        logger.warning(
+            "run_kfold_validation: %d samples < k=%d, skipping.", len(X), k
+        )
+        return None
+
+    X_arr = np.array(X, dtype=float)
+    y_arr = np.array(y)
+
+    skf = StratifiedKFold(n_splits=k, shuffle=True, random_state=42)
+    fold_accuracies: list[float] = []
+
+    for fold_idx, (train_idx, test_idx) in enumerate(skf.split(X_arr, y_arr)):
+        clf_fold = clone(clf_template)
+        clf_fold.fit(X_arr[train_idx], y_arr[train_idx])
+        y_pred = clf_fold.predict(X_arr[test_idx])
+        acc = float((y_pred == y_arr[test_idx]).mean())
+        fold_accuracies.append(acc)
+        logger.debug("K-fold fold %d/%d: accuracy=%.3f", fold_idx + 1, k, acc)
+
+    mean_acc = float(np.mean(fold_accuracies))
+    std_acc = float(np.std(fold_accuracies))
+    logger.info(
+        "K-fold (k=%d): mean_accuracy=%.3f ± %.3f", k, mean_acc, std_acc
+    )
+    return {
+        "mean_accuracy":   mean_acc,
+        "std_accuracy":    std_acc,
+        "fold_accuracies": fold_accuracies,
+        "n_folds":         k,
+    }
