@@ -64,6 +64,15 @@ LAI_MILD: float = 1.2
 MIN_TRADES_FOR_FULL_SEVERITY: int = 3
 
 # ---------------------------------------------------------------------------
+# DEI formula variant selection
+# ---------------------------------------------------------------------------
+# If True (production default), use dollar-weighted DEI (Frazzini, 2006):
+#   weights each position by trade value (quantity × |price_diff|).
+# If False, use count-based DEI (Odean, 1998): equal weight per position.
+# Both variants produce DEI ∈ [−1, 1]; switch does not affect severity thresholds.
+USE_DOLLAR_WEIGHTED_DEI: bool = True
+
+# ---------------------------------------------------------------------------
 # Stock catalog
 # ---------------------------------------------------------------------------
 STOCK_CATALOG_FILE = DATA_DIR / "stock_catalog.json"
@@ -121,3 +130,5 @@ def validate_config() -> None:
         raise ValueError(f"LAI_EMA_CEILING must be > 0, got {LAI_EMA_CEILING}")
     if MIN_TRADES_FOR_FULL_SEVERITY < 1:
         raise ValueError(f"MIN_TRADES_FOR_FULL_SEVERITY must be >= 1, got {MIN_TRADES_FOR_FULL_SEVERITY}")
+    if not isinstance(USE_DOLLAR_WEIGHTED_DEI, bool):
+        raise ValueError("USE_DOLLAR_WEIGHTED_DEI must be a bool")
