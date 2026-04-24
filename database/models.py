@@ -23,12 +23,24 @@ class Base(DeclarativeBase):
 
 
 class User(Base):
-    """Retail investor user identified by alias (no authentication)."""
+    """Retail investor user. In v6 the canonical identity is ``username`` with a
+    bcrypt ``password_hash``; ``alias`` is retained as a nullable display field
+    and for backward compatibility with pre-v6 records (legacy tests seed Users
+    without auth credentials).
+    """
 
     __tablename__ = "users"
 
     id: int = Column(Integer, primary_key=True, autoincrement=True)
-    alias: str = Column(String(64), unique=True, nullable=False)
+
+    # v6 auth fields — nullable in schema to preserve legacy fixtures, but
+    # the auth service treats them as required when registering.
+    username: Optional[str] = Column(String(64), unique=True, nullable=True, index=True)
+    password_hash: Optional[str] = Column(String(128), nullable=True)
+    last_login_at: Optional[datetime] = Column(DateTime(timezone=True), nullable=True)
+
+    # Legacy fields — retained for backward compatibility.
+    alias: Optional[str] = Column(String(64), unique=True, nullable=True)
     experience_level: str = Column(
         String(20), nullable=False, default="beginner"
     )  # beginner | intermediate | advanced
@@ -52,9 +64,107 @@ class User(Base):
         lazy="dynamic",
         cascade="all, delete-orphan",
     )
+    profile = relationship(
+        "UserProfile", back_populates="user", uselist=False, cascade="all, delete-orphan"
+    )
+    onboarding_surveys = relationship(
+        "OnboardingSurvey",
+        back_populates="user",
+        lazy="dynamic",
+        cascade="all, delete-orphan",
+    )
 
     def __repr__(self) -> str:
-        return f"<User id={self.id} alias={self.alias!r}>"
+        ident = self.username or self.alias or f"id={self.id}"
+        return f"<User id={self.id} {ident!r}>"
+
+
+class UserProfile(Base):
+    """One-time demographic & trait profile collected at v6 registration."""
+
+    __tablename__ = "user_profiles"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    user_id: int = Column(
+        Integer, ForeignKey("users.id"), unique=True, nullable=False
+    )
+    full_name: str = Column(String(128), nullable=False)
+    age: int = Column(Integer, nullable=False)
+    # "laki-laki" | "perempuan" | "lainnya"
+    gender: str = Column(String(16), nullable=False)
+    # "konservatif" | "moderat" | "agresif"
+    risk_profile: str = Column(String(32), nullable=False)
+    # "pemula" | "menengah" | "berpengalaman"
+    investing_capability: str = Column(String(32), nullable=False)
+    created_at: datetime = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    user = relationship("User", back_populates="profile")
+
+    def __repr__(self) -> str:
+        return (
+            f"<UserProfile user={self.user_id} full_name={self.full_name!r} "
+            f"risk={self.risk_profile}>"
+        )
+
+
+class OnboardingSurvey(Base):
+    """Initial bias-tendency survey (9 Likert items) collected at registration.
+
+    Kept separate from ``UserSurvey`` so the legacy 4-item structure continues
+    to satisfy existing fixtures unchanged. The 9 items cover 3 biases × 3 items
+    each (DEI, OCS, LAI) aligned with Odean 1998, Barber & Odean 2000,
+    Kahneman & Tversky 1979.
+    """
+
+    __tablename__ = "onboarding_surveys"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    user_id: int = Column(
+        Integer, ForeignKey("users.id"), unique=True, nullable=False
+    )
+
+    # DEI items (1–5 Likert)
+    dei_q1: int = Column(Integer, nullable=False)
+    dei_q2: int = Column(Integer, nullable=False)
+    dei_q3: int = Column(Integer, nullable=False)
+    # OCS items (1–5 Likert)
+    ocs_q1: int = Column(Integer, nullable=False)
+    ocs_q2: int = Column(Integer, nullable=False)
+    ocs_q3: int = Column(Integer, nullable=False)
+    # LAI items (1–5 Likert)
+    lai_q1: int = Column(Integer, nullable=False)
+    lai_q2: int = Column(Integer, nullable=False)
+    lai_q3: int = Column(Integer, nullable=False)
+
+    submitted_at: datetime = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    user = relationship("User", back_populates="onboarding_surveys")
+
+    @property
+    def dei_mean(self) -> float:
+        return (self.dei_q1 + self.dei_q2 + self.dei_q3) / 3.0
+
+    @property
+    def ocs_mean(self) -> float:
+        return (self.ocs_q1 + self.ocs_q2 + self.ocs_q3) / 3.0
+
+    @property
+    def lai_mean(self) -> float:
+        return (self.lai_q1 + self.lai_q2 + self.lai_q3) / 3.0
+
+    def __repr__(self) -> str:
+        return (
+            f"<OnboardingSurvey user={self.user_id} "
+            f"dei={self.dei_mean:.1f} ocs={self.ocs_mean:.1f} lai={self.lai_mean:.1f}>"
+        )
 
 
 class StockCatalog(Base):
@@ -276,7 +386,13 @@ class ConsentLog(Base):
 
 
 class UserSurvey(Base):
-    """Optional self-reported risk preference survey (pre-simulation)."""
+    """Self-reported risk-preference survey.
+
+    ``survey_type`` discriminates between:
+        - "onboarding":  captured once at registration (pre-simulation).
+        - "session_level": captured at the end of each simulation session.
+    Legacy records default to "session_level".
+    """
 
     __tablename__ = "user_surveys"
 
@@ -290,6 +406,10 @@ class UserSurvey(Base):
     q_loss_sensitivity: int = Column(Integer, nullable=False)     # 1=tidak terganggu, 5=sangat terganggu
     q_trading_frequency: int = Column(Integer, nullable=False)    # 1=sangat jarang, 5=sangat sering
     q_holding_behavior: int = Column(Integer, nullable=False)     # 1=langsung jual, 5=selalu menahan
+
+    survey_type: str = Column(
+        String(24), nullable=False, default="session_level"
+    )  # "onboarding" | "session_level"
 
     submitted_at: datetime = Column(
         DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)

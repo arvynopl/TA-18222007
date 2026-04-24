@@ -81,25 +81,27 @@ def render_bias_card(
         recommendation: Recommendation text (Bahasa Indonesia).
         prev_severity:  Severity from the previous session, if available.
     """
-    color = SEVERITY_COLORS.get(severity, "#78909c")
-    bg = SEVERITY_BG.get(severity, "rgba(255,255,255,0.05)")
+    color = SEVERITY_COLORS.get(severity, "#5F6368")
+    bg = SEVERITY_BG.get(severity, "rgba(0,0,0,0.03)")
     icon = SEVERITY_ICONS.get(severity, "⚪")
     label = SEVERITY_LABELS.get(severity, severity)
     title = BIAS_NAMES.get(bias_type, bias_type.replace("_", " ").title())
     desc = BIAS_DESCRIPTIONS.get(bias_type, "")
 
-    # Styled card header with colored left border
+    # Styled card header with colored left border (light theme)
     st.markdown(
         f"""
         <div style="
             border-left: 4px solid {color};
             background: {bg};
+            border: 1px solid #E5E7EB;
+            border-left-width: 4px;
             border-radius: 8px;
             padding: 16px 20px;
             margin-bottom: 4px;
         ">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                <span style="font-size: 17px; font-weight: 600; color: white;">
+                <span style="font-size: 17px; font-weight: 600; color: #1C1E21;">
                     {icon} {title}
                 </span>
                 <span style="
@@ -111,7 +113,7 @@ def render_bias_card(
                     font-weight: 500;
                 ">{label}</span>
             </div>
-            <p style="color: #90A4AE; font-size: 12px; margin: 0;">{desc}</p>
+            <p style="color: #5F6368; font-size: 12px; margin: 0;">{desc}</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -187,17 +189,80 @@ def render_longitudinal_section(user_id: int) -> None:
                 )
 
 
+INTERACTION_TEASER_THRESHOLD_SESSIONS = 5
+
+
+def render_interaction_teaser(session_count: int) -> None:
+    """Render a teaser for the interaction/anomaly module before session 5."""
+    remaining = max(0, INTERACTION_TEASER_THRESHOLD_SESSIONS - session_count)
+    st.markdown("---")
+    st.markdown(
+        f"""
+        <div style="
+            background: rgba(37, 99, 235, 0.05);
+            border: 1px solid rgba(37, 99, 235, 0.25);
+            border-radius: 10px;
+            padding: 18px 22px;
+        ">
+            <div style="font-size:16px; font-weight:700; color:#2563EB; margin-bottom:8px;">
+                🔒 Buka Insight Mendalam di Sesi ke-5
+            </div>
+            <div style="color:#1F2937; font-size:14px; line-height:1.7;">
+                Setelah Anda menyelesaikan <b>5 sesi simulasi</b>, Anda akan menerima:
+                <ul style='margin:8px 0 8px 18px; padding:0;'>
+                    <li><b>Peta Interaksi Antar-Bias</b> (<i>Bias Interaction Map</i>) — koefisien korelasi
+                        Pearson antara Efek Disposisi, Bias Keyakinan Berlebih, dan Kecenderungan
+                        Menghindari Kerugian, untuk mengungkap bias majemuk yang unik pada Anda.</li>
+                    <li><b>Deteksi Anomali</b> (<i>ML-Validated Anomaly Detection</i>) — identifikasi
+                        keputusan yang menyimpang dari pola pribadi Anda.</li>
+                </ul>
+                Sesi tersisa: <b>{remaining}</b>.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _translate_top_correlation(interaction_scores: dict) -> str | None:
+    """Produce a plain-language Bahasa narrative for the strongest pairwise r."""
+    if not interaction_scores:
+        return None
+    _PAIR_LABELS = {
+        "ocs_dei": ("bias Keyakinan Berlebih", "Efek Disposisi"),
+        "ocs_lai": ("bias Keyakinan Berlebih", "kecenderungan Menghindari Kerugian"),
+        "dei_lai": ("Efek Disposisi", "kecenderungan Menghindari Kerugian"),
+    }
+    ranked = sorted(
+        (
+            (k, v) for k, v in interaction_scores.items()
+            if v is not None and k in _PAIR_LABELS
+        ),
+        key=lambda kv: abs(kv[1]),
+        reverse=True,
+    )
+    if not ranked:
+        return None
+    key, r = ranked[0]
+    a, b = _PAIR_LABELS[key]
+    if abs(r) < 0.30:
+        return (
+            f"Korelasi antar-bias Anda masih lemah (r = {r:+.2f}) — belum ada "
+            f"pola gabungan yang mencolok antara {a} dan {b}."
+        )
+    direction = "ikut meningkat" if r > 0 else "justru menurun"
+    return (
+        f"Ketika {a} Anda meningkat, {b} cenderung {direction} "
+        f"(r = {r:+.2f}). Kedua bias ini saling terkait dalam pola keputusan "
+        f"Anda — waspada terhadap siklus umpan balik ini."
+    )
+
+
 def render_interaction_synthesis(user_id: int, session_id: str) -> None:
-    """Render a coupled-bias synthesis card when strong interactions are detected.
+    """Render the interaction heatmap + narrative at session 5+, or a teaser before that.
 
-    Reads CognitiveProfile.interaction_scores (already stored) and calls
-    _get_interaction_modifier() from the generator. Only renders when at least
-    one pairwise Pearson r exceeds the threshold AND session_count >= 5.
-
-    Args:
-        user_id:    ID of the user.
-        session_id: UUID of the current session (unused directly; passed for
-                    future extensibility).
+    The teaser is always shown for sessions 1–4 so users understand what
+    unlocks at session 5. From session 5 onward the full synthesis renders.
     """
     from database.models import CognitiveProfile
     from modules.feedback.generator import _get_interaction_modifier
@@ -206,13 +271,14 @@ def render_interaction_synthesis(user_id: int, session_id: str) -> None:
         profile = sess.query(CognitiveProfile).filter_by(user_id=user_id).first()
         if profile is None:
             return
-        # Snapshot relevant fields before session closes
         session_count = profile.session_count
         interaction_scores = profile.interaction_scores
         stability_index = profile.stability_index
 
-    # Build a temporary profile-like namespace for the modifier function
-    # (avoids DetachedInstanceError — all data already extracted above)
+    if session_count < INTERACTION_TEASER_THRESHOLD_SESSIONS:
+        render_interaction_teaser(session_count)
+        return
+
     class _ProfileSnapshot:
         pass
 
@@ -222,17 +288,19 @@ def render_interaction_synthesis(user_id: int, session_id: str) -> None:
     snap.stability_index = stability_index
 
     insights = _get_interaction_modifier(snap)  # type: ignore[arg-type]
-    if not insights:
-        return
 
     st.markdown("---")
     st.subheader("🔗 Pola Bias Gabungan")
     st.caption(
-        "Analisis keterkaitan antar-bias berdasarkan riwayat multi-sesi kamu. "
-        "Pola ini terdeteksi hanya setelah minimal 5 sesi selesai."
+        "Analisis keterkaitan antar-bias berdasarkan riwayat multi-sesi Anda. "
+        "Pola ini menjadi stabil setelah minimal 5 sesi selesai."
     )
 
-    for insight in insights:
+    narrative = _translate_top_correlation(interaction_scores or {})
+    if narrative:
+        st.info(narrative)
+
+    for insight in insights or []:
         st.info(insight)
 
 
@@ -415,6 +483,9 @@ def render_feedback_page(user_id: int, session_id: str) -> None:
 
     render_stated_vs_revealed(user_id)
 
+    # Interaction synthesis (teaser before session 5, full narrative after)
+    render_interaction_synthesis(user_id, session_id)
+
     # --- Session navigation CTAs ---
     st.divider()
     col_new, col_profile = st.columns(2)
@@ -456,10 +527,11 @@ def render_stated_vs_revealed(user_id: int) -> None:
         return
 
     st.markdown("---")
-    st.subheader("🔍 Perbandingan: Pernyataan vs. Perilaku")
+    st.subheader("🔍 Perbandingan: Niat vs Aksi")
     st.caption(
-        "Tabel berikut membandingkan apa yang Anda nyatakan dalam survei awal "
-        "dengan perilaku aktual yang terdeteksi dari sesi simulasi terbaru."
+        "Perbandingan ini memakai survei terbaru Anda — baik dari pendaftaran "
+        "awal maupun sesi sebelumnya — sehingga bersifat dinamis mengikuti "
+        "perkembangan pemahaman diri Anda."
     )
 
     _LEVEL_ID = {"low": "Rendah", "medium": "Sedang", "high": "Tinggi"}
@@ -482,7 +554,7 @@ def render_stated_vs_revealed(user_id: int) -> None:
     h2.markdown("**Yang Anda Nyatakan**")
     h3.markdown("**Yang Terdeteksi**")
     h4.markdown("**Kesenjangan**")
-    st.markdown("<hr style='margin:4px 0; border-color:rgba(255,255,255,0.1);'>", unsafe_allow_html=True)
+    st.markdown("<hr style='margin:4px 0; border-color:#E5E7EB;'>", unsafe_allow_html=True)
 
     narratives: list[str] = []
     for comp in report.comparisons:
