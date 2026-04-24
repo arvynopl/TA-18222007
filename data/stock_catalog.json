@@ -6,6 +6,7 @@
     "sector": "Finance",
     "volatility_class": "low",
     "bias_role": "Blue-chip anchor — tests disposition effect",
+    "description": "Bank swasta terbesar di Indonesia, dikenal dengan layanan digital perbankan yang luas dan stabil.",
     "data_start": "2024-04-02",
     "data_end": "2026-04-02",
     "total_records": 471,
@@ -19,6 +20,7 @@
     "sector": "Telecom",
     "volatility_class": "low_medium",
     "bias_role": "Stable dividend stock — rational baseline",
+    "description": "Perusahaan telekomunikasi milik negara, penyedia jaringan internet dan telepon terbesar di Indonesia.",
     "data_start": "2024-04-02",
     "data_end": "2026-04-02",
     "total_records": 471,
@@ -32,6 +34,7 @@
     "sector": "Mining",
     "volatility_class": "high",
     "bias_role": "Commodity volatility — triggers loss aversion & overconfidence",
+    "description": "Perusahaan tambang emas dan nikel milik negara (BUMN), harganya sensitif terhadap harga komoditas global.",
     "data_start": "2024-04-02",
     "data_end": "2026-04-02",
     "total_records": 471,
@@ -45,6 +48,7 @@
     "sector": "Technology",
     "volatility_class": "high",
     "bias_role": "High-sentiment — elicits overtrading & emotional decisions",
+    "description": "Induk dari Gojek dan Tokopedia, platform super-app terbesar di Indonesia untuk transportasi dan e-commerce.",
     "data_start": "2024-04-02",
     "data_end": "2026-04-02",
     "total_records": 471,
@@ -58,6 +62,7 @@
     "sector": "Consumer",
     "volatility_class": "medium",
     "bias_role": "Defensive with decline periods — tests holding losers",
+    "description": "Produsen produk konsumer rumah tangga dan perawatan diri, seperti sabun, shampo, dan makanan kemasan.",
     "data_start": "2024-04-02",
     "data_end": "2026-04-02",
     "total_records": 471,
@@ -71,6 +76,7 @@
     "sector": "Finance",
     "volatility_class": "medium",
     "bias_role": "Widely held retail stock — familiar to pilot users",
+    "description": "Bank milik negara dengan jaringan terluas di Indonesia, fokus pada kredit UMKM dan segmen ritel.",
     "data_start": "2024-04-02",
     "data_end": "2026-04-02",
     "total_records": 471,
@@ -83,7 +89,8 @@
     "name": "Astra International Tbk.",
     "sector": "Conglomerate",
     "volatility_class": "medium",
-    "bias_role": "Diversified conglomerate — baseline risk"
+    "bias_role": "Diversified conglomerate — baseline risk",
+    "description": "Konglomerat diversifikasi terbesar di Indonesia, bergerak di otomotif, alat berat, pertambangan, dan keuangan."
   },
   {
     "stock_id": "BMRI.JK",
@@ -91,7 +98,8 @@
     "name": "Bank Mandiri Tbk.",
     "sector": "Finance",
     "volatility_class": "low_medium",
-    "bias_role": "State bank — familiar to retail investors"
+    "bias_role": "State bank — familiar to retail investors",
+    "description": "Bank BUMN terbesar berdasarkan aset, melayani korporasi, UMKM, dan nasabah ritel di seluruh Indonesia."
   },
   {
     "stock_id": "ICBP.JK",
@@ -99,7 +107,8 @@
     "name": "Indofood CBP Sukses Makmur Tbk.",
     "sector": "Consumer",
     "volatility_class": "low",
-    "bias_role": "Defensive consumer — rational hold anchor"
+    "bias_role": "Defensive consumer — rational hold anchor",
+    "description": "Produsen makanan kemasan terbesar di Indonesia, dikenal melalui merek Indomie dan produk konsumer sehari-hari."
   },
   {
     "stock_id": "MDKA.JK",
@@ -107,7 +116,8 @@
     "name": "Merdeka Copper Gold Tbk.",
     "sector": "Mining",
     "volatility_class": "high",
-    "bias_role": "High-beta mining — overconfidence trigger"
+    "bias_role": "High-beta mining — overconfidence trigger",
+    "description": "Perusahaan tambang tembaga dan emas berkapitalisasi besar, harganya sangat sensitif terhadap siklus komoditas."
   },
   {
     "stock_id": "BRIS.JK",
@@ -115,7 +125,8 @@
     "name": "Bank Syariah Indonesia Tbk.",
     "sector": "Finance",
     "volatility_class": "medium",
-    "bias_role": "Sharia bank — retail sentiment driven"
+    "bias_role": "Sharia bank — retail sentiment driven",
+    "description": "Bank syariah terbesar di Indonesia hasil merger tiga bank syariah BUMN, melayani segmen perbankan Islam."
   },
   {
     "stock_id": "EMTK.JK",
@@ -123,6 +134,7 @@
     "name": "Elang Mahkota Teknologi Tbk.",
     "sector": "Media & Tech",
     "volatility_class": "high",
-    "bias_role": "High-sentiment tech — emotional trading trigger"
+    "bias_role": "High-sentiment tech — emotional trading trigger",
+    "description": "Konglomerat media dan teknologi, pemilik Emtek Group yang mencakup platform digital dan jaringan televisi."
   }
 ]

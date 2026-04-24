@@ -326,6 +326,22 @@ def init_simulation_session() -> None:
                 for s in stocks
             }
 
+    if "stock_descriptions" not in st.session_state:
+        try:
+            import json
+            from config import STOCK_CATALOG_FILE
+            with open(STOCK_CATALOG_FILE, "r", encoding="utf-8") as _f:
+                _catalog = json.load(_f)
+            st.session_state["stock_descriptions"] = {
+                item["stock_id"]: {
+                    "description": item.get("description", ""),
+                    "volatility_class": item.get("volatility_class", ""),
+                }
+                for item in _catalog
+            }
+        except Exception:
+            st.session_state["stock_descriptions"] = {}
+
 
 def reset_simulation() -> None:
     """Clear all simulation-related state keys to start fresh."""
@@ -333,6 +349,7 @@ def reset_simulation() -> None:
         "sim_session_id", "sim_portfolio", "sim_engine", "sim_window",
         "sim_stock_ids", "sim_current_round", "sim_round_start_time", "sim_complete",
         "sim_submitted_round", "stock_metadata", "sim_pre_history", "sim_pending_orders",
+        "stock_descriptions",
     ]:
         st.session_state.pop(key, None)
 
@@ -707,11 +724,35 @@ def render_simulation_page() -> None:
         meta = meta_map.get(sid, {})
         ticker = sid.split(".")[0]
 
-        # Stock header
-        st.markdown(
-            f"**{ticker}** — {meta.get('name', '')} "
-            f"*({meta.get('sector', '')})*"
-        )
+        # Stock header — STOCK-01
+        desc_map = st.session_state.get("stock_descriptions", {})
+        stock_info = desc_map.get(sid, {})
+        vol_class = stock_info.get("volatility_class", "")
+        description = stock_info.get("description", "")
+
+        _VOL_LABEL = {
+            "low": ("Stabil", "#50c88c"),
+            "low_medium": ("Cukup Stabil", "#6c8fff"),
+            "medium": ("Moderat", "#ffbe3c"),
+            "high": ("Volatil", "#ff7070"),
+        }
+        vol_label, vol_color = _VOL_LABEL.get(vol_class, ("—", "#8b8fa8"))
+
+        hdr_col, badge_col = st.columns([5, 1])
+        with hdr_col:
+            st.markdown(
+                f"**{ticker}** — {meta.get('name', '')} "
+                f"*({meta.get('sector', '')})*"
+            )
+        with badge_col:
+            st.markdown(
+                f"<div style='text-align:right; padding-top:4px;'>"
+                f"<span style='color:{vol_color}; font-size:11px; font-weight:600;'>"
+                f"● {vol_label}</span></div>",
+                unsafe_allow_html=True,
+            )
+        if description:
+            st.caption(description)
 
         # Technical indicators row (above chart so users read them before the chart shapes perception)
         ma5 = snap.get("ma_5")
