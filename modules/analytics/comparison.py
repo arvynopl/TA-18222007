@@ -177,7 +177,15 @@ def build_stated_vs_revealed(
     Returns:
         StatedVsRevealedReport dataclass.
     """
-    survey = db_session.query(UserSurvey).filter_by(user_id=user_id).first()
+    # v6: use the most recent UserSurvey row regardless of survey_type so the
+    # comparison naturally follows the user's evolving self-perception — see
+    # "Niat vs Aksi" section in the feedback renderer.
+    survey = (
+        db_session.query(UserSurvey)
+        .filter_by(user_id=user_id)
+        .order_by(UserSurvey.submitted_at.desc())
+        .first()
+    )
 
     if survey is None:
         return StatedVsRevealedReport(has_survey=False, overall_alignment="no_survey")

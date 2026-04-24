@@ -73,6 +73,14 @@ MIN_TRADES_FOR_FULL_SEVERITY: int = 3
 USE_DOLLAR_WEIGHTED_DEI: bool = True
 
 # ---------------------------------------------------------------------------
+# Authentication (v6)
+# ---------------------------------------------------------------------------
+BCRYPT_ROUNDS: int = int(os.environ.get("CDT_BCRYPT_ROUNDS", "12"))
+AUTH_RATE_LIMIT_MAX: int = 5
+AUTH_RATE_LIMIT_WINDOW_SEC: int = 600  # 10 minutes
+AUTH_PASSWORD_MIN_LEN: int = 8
+
+# ---------------------------------------------------------------------------
 # Stock catalog
 # ---------------------------------------------------------------------------
 STOCK_CATALOG_FILE = DATA_DIR / "stock_catalog.json"
@@ -132,3 +140,15 @@ def validate_config() -> None:
         raise ValueError(f"MIN_TRADES_FOR_FULL_SEVERITY must be >= 1, got {MIN_TRADES_FOR_FULL_SEVERITY}")
     if not isinstance(USE_DOLLAR_WEIGHTED_DEI, bool):
         raise ValueError("USE_DOLLAR_WEIGHTED_DEI must be a bool")
+
+    # Auth parameters
+    if not (4 <= BCRYPT_ROUNDS <= 16):
+        raise ValueError(
+            f"BCRYPT_ROUNDS must be in [4, 16], got {BCRYPT_ROUNDS}"
+        )
+    if AUTH_RATE_LIMIT_MAX < 1:
+        raise ValueError("AUTH_RATE_LIMIT_MAX must be >= 1")
+    if AUTH_RATE_LIMIT_WINDOW_SEC < 1:
+        raise ValueError("AUTH_RATE_LIMIT_WINDOW_SEC must be >= 1 second")
+    if AUTH_PASSWORD_MIN_LEN < 6:
+        raise ValueError("AUTH_PASSWORD_MIN_LEN must be >= 6")
