@@ -57,9 +57,17 @@ def _apply_schema_migrations(engine: Engine) -> None:
         ("bias_metrics", "lai_ci_lower", "REAL DEFAULT NULL"),
         ("bias_metrics", "lai_ci_upper", "REAL DEFAULT NULL"),
         ("bias_metrics", "ci_low_confidence", "INTEGER DEFAULT NULL"),
+        # v6 auth fields
+        ("users", "username", "VARCHAR(64) DEFAULT NULL"),
+        ("users", "password_hash", "VARCHAR(128) DEFAULT NULL"),
+        ("users", "last_login_at", "DATETIME DEFAULT NULL"),
+        # v6 survey discriminator
+        ("user_surveys", "survey_type", "VARCHAR(24) DEFAULT 'session_level'"),
     ]
     with engine.connect() as conn:
         for table, column, col_def in migrations:
+            if not inspector.has_table(table):
+                continue
             existing = {col["name"] for col in inspector.get_columns(table)}
             if column not in existing:
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_def}"))

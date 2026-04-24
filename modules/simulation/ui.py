@@ -43,6 +43,44 @@ def _format_rupiah(value: float) -> str:
     return f"Rp {value:,.0f}"
 
 
+ACTION_LABELS = {"buy": "Beli", "sell": "Jual", "hold": "Tahan"}
+
+# Bahasa → internal action key
+_ACTION_ID_FROM_BAHASA = {"Beli": "buy", "Jual": "sell", "Tahan": "hold"}
+
+
+def build_order_button_label(action_type: str, ticker: str) -> str:
+    """Produce the reactive confirm-button label for the order panel.
+
+    Accepts either the Bahasa label (``Beli/Jual/Tahan``) or the internal
+    action id (``buy/sell/hold``). ``Tahan`` / ``hold`` renders a
+    "Konfirmasi: …" label since no queue change is needed, while the other
+    two render "Tambahkan ke Antrean: …".
+    """
+    ticker = ticker or ""
+    action_id = _ACTION_ID_FROM_BAHASA.get(action_type, action_type)
+    bahasa = ACTION_LABELS.get(action_id, action_type)
+    if action_id == "hold":
+        return f"Konfirmasi: {bahasa} {ticker}".rstrip()
+    return f"Tambahkan ke Antrean: {bahasa} {ticker}".rstrip()
+
+
+def compute_projected_end_round_cash(
+    portfolio, current_prices: dict
+) -> float:
+    """Hypothetical cash if every open position is liquidated at current prices.
+
+    Formula: ``cash + Σ (qty × price)`` across all holdings.
+    Stocks absent from ``current_prices`` fall back to their average purchase
+    price so the projection stays defined even with missing snapshots.
+    """
+    total = float(portfolio.cash)
+    for sid, pos in portfolio.holdings.items():
+        px = current_prices.get(sid, pos.avg_purchase_price)
+        total += float(pos.quantity) * float(px)
+    return total
+
+
 def _build_full_chart(
     stock_id: str,
     pre_history: list[dict],
@@ -65,18 +103,29 @@ def _build_full_chart(
         vertical_spacing=0.02,
     )
 
-    # --- Pre-window history (dimmed line) ---
+    # --- Pre-window history (muted candlesticks + MA overlays) ---
     if pre_history:
         pre_dates = [
             d["date"].isoformat() if hasattr(d["date"], "isoformat") else str(d["date"])
             for d in pre_history
         ]
-        pre_closes = [d["close"] for d in pre_history]
-        fig.add_trace(go.Scatter(
-            x=pre_dates, y=pre_closes,
-            mode="lines", name="Riwayat",
-            line=dict(color="rgba(150,150,150,0.5)", width=1),
-            hovertemplate="%{x}<br>Harga: %{y:,.0f}<extra></extra>",
+        fig.add_trace(go.Candlestick(
+            x=pre_dates,
+            open=[d["open"] for d in pre_history],
+            high=[d["high"] for d in pre_history],
+            low=[d["low"] for d in pre_history],
+            close=[d["close"] for d in pre_history],
+            name="Riwayat",
+            increasing=dict(
+                line=dict(color=COLOR_GAIN),
+                fillcolor=COLOR_GAIN,
+            ),
+            decreasing=dict(
+                line=dict(color=COLOR_LOSS),
+                fillcolor=COLOR_LOSS,
+            ),
+            opacity=0.45,  # muted historical window
+            showlegend=True,
         ), row=1, col=1)
 
         # Pre-window MA overlays (dimmed)
@@ -86,7 +135,7 @@ def _build_full_chart(
             fig.add_trace(go.Scatter(
                 x=pre_dates, y=pre_ma5,
                 mode="lines", name="MA5 (historis)",
-                line=dict(color="rgba(255,127,14,0.3)", width=1, dash="dash"),
+                line=dict(color="rgba(227,116,0,0.35)", width=1, dash="dash"),
                 hoverinfo="skip",
             ), row=1, col=1)
         if any(v is not None for v in pre_ma20):
@@ -97,12 +146,12 @@ def _build_full_chart(
                 hoverinfo="skip",
             ), row=1, col=1)
 
-        # Pre-window volume bars (dimmed)
+        # Pre-window volume bars — colour-matched to OHLC direction at 0.45 opacity.
         pre_vols = [d.get("volume") or 0 for d in pre_history]
         pre_vol_colors = [
-            f"rgba({int(COLOR_GAIN[1:3],16)},{int(COLOR_GAIN[3:5],16)},{int(COLOR_GAIN[5:],16)},0.3)"
+            f"rgba({int(COLOR_GAIN[1:3],16)},{int(COLOR_GAIN[3:5],16)},{int(COLOR_GAIN[5:],16)},0.45)"
             if d["close"] >= d["open"]
-            else f"rgba({int(COLOR_LOSS[1:3],16)},{int(COLOR_LOSS[3:5],16)},{int(COLOR_LOSS[5:],16)},0.3)"
+            else f"rgba({int(COLOR_LOSS[1:3],16)},{int(COLOR_LOSS[3:5],16)},{int(COLOR_LOSS[5:],16)},0.45)"
             for d in pre_history
         ]
         fig.add_trace(go.Bar(
@@ -210,9 +259,9 @@ def _build_full_chart(
         )
     )
     fig.update_xaxes(rangeslider_visible=False)
-    fig.update_yaxes(title_text="Harga (Rp)", row=1, col=1, gridcolor="rgba(255,255,255,0.08)")
-    fig.update_yaxes(title_text="Volume", row=2, col=1, gridcolor="rgba(255,255,255,0.08)")
-    fig.update_xaxes(type="category", gridcolor="rgba(255,255,255,0.08)")
+    fig.update_yaxes(title_text="Harga (Rp)", row=1, col=1, gridcolor="rgba(0,0,0,0.08)")
+    fig.update_yaxes(title_text="Volume", row=2, col=1, gridcolor="rgba(0,0,0,0.08)")
+    fig.update_xaxes(type="category", gridcolor="rgba(0,0,0,0.08)")
     return fig
 
 
@@ -692,14 +741,25 @@ def render_simulation_page() -> None:
         st.divider()
         st.markdown("**Posisi Terbuka**")
         if portfolio.holdings:
-            for sid, pos in portfolio.holdings.items():
-                curr = current_prices.get(sid, pos.avg_purchase_price)
+            for sid_h, pos in portfolio.holdings.items():
+                curr = current_prices.get(sid_h, pos.avg_purchase_price)
+                # Per-position cash impact if closed now (+/− Rp vs entry).
                 pnl = (curr - pos.avg_purchase_price) * pos.quantity
+                proceeds = curr * pos.quantity
                 icon = "🟢" if pnl >= 0 else "🔴"
+                pnl_sign = "+" if pnl >= 0 else "−"
                 st.caption(
-                    f"{icon} **{sid.split('.')[0]}**: {pos.quantity} lbr "
-                    f"@ {_format_rupiah(pos.avg_purchase_price)}"
+                    f"{icon} **{sid_h.split('.')[0]}**: {pos.quantity} lbr "
+                    f"@ {_format_rupiah(pos.avg_purchase_price)}  •  "
+                    f"Kas bila ditutup: {_format_rupiah(proceeds)}  "
+                    f"({pnl_sign}{_format_rupiah(abs(pnl))})"
                 )
+
+            projected = compute_projected_end_round_cash(portfolio, current_prices)
+            st.caption(
+                f"**Proyeksi Kas Akhir Ronde (jika semua posisi ditutup):** "
+                f"{_format_rupiah(projected)}"
+            )
         else:
             st.caption("Belum ada posisi terbuka")
 
@@ -817,26 +877,32 @@ def render_simulation_page() -> None:
                 f"| P&L: {pos_pnl_sign}{_format_rupiah(pos_pnl)}"
             )
 
-        # Order panel inside a form (prevents rerun on every widget change)
+        # Order panel — the action radio sits OUTSIDE the form so the submit
+        # button label stays reactive to Beli/Jual/Tahan toggles.
+        st.markdown(f"**Keputusan untuk {ticker}**")
+
+        existing_order = pending.get(sid, {})
+        action_options = ["Tahan", "Beli", "Jual"]
+        default_action_idx = 0
+        if existing_order.get("action_type") in action_options:
+            default_action_idx = action_options.index(existing_order["action_type"])
+
+        action_type = st.radio(
+            "Aksi",
+            action_options,
+            index=default_action_idx,
+            horizontal=True,
+            key=f"action_radio_{sid}_{current_round}",
+        )
+        # Expose current action in session state so helpers (and the reactive
+        # confirm button label) can read it on every rerun.
+        st.session_state["pending_action"] = {
+            "Beli": "buy", "Jual": "sell", "Tahan": "hold",
+        }[action_type]
+        st.session_state["pending_ticker"] = ticker
+
         with st.form(f"order_{current_round}_{sid}", clear_on_submit=False):
-            st.markdown(f"**Keputusan untuk {ticker}**")
             held = portfolio.holdings.get(sid)
-
-            # Pre-fill from pending if already confirmed
-            existing_order = pending.get(sid, {})
-            default_action_idx = 0
-            action_options = ["Tahan", "Beli", "Jual"]
-            if existing_order.get("action_type") in action_options:
-                default_action_idx = action_options.index(existing_order["action_type"])
-
-            action_type = st.radio(
-                "Aksi",
-                action_options,
-                index=default_action_idx,
-                horizontal=True,
-                key=f"action_form_{sid}_{current_round}",
-            )
-
             quantity = 0
             if action_type == "Beli":
                 max_buy = int(available_cash // snap["close"]) if snap["close"] > 0 else 0
@@ -874,12 +940,10 @@ def render_simulation_page() -> None:
                         f"Setelah eksekusi: Kas = {_format_rupiah(portfolio.cash + proceeds)}"
                         + (f", Sisa = {remaining_qty} lbr" if remaining_qty > 0 else ", Posisi ditutup")
                     )
+            else:
+                st.caption("Anda memilih **Tahan** — tidak ada transaksi untuk saham ini.")
 
-            btn_label = (
-                f"Konfirmasi: Tahan {ticker}"
-                if action_type == "Tahan"
-                else f"Tambahkan ke Antrean: {action_type} {ticker}"
-            )
+            btn_label = build_order_button_label(action_type, ticker)
             order_submitted = st.form_submit_button(btn_label, use_container_width=True)
 
         if order_submitted:
@@ -888,7 +952,6 @@ def render_simulation_page() -> None:
             elif action_type == "Jual" and quantity > 0:
                 pending[sid] = {"action_type": "Jual", "quantity": quantity}
             else:
-                # Explicit Tahan confirmation (or Beli/Jual with qty=0 falls back to Tahan)
                 pending[sid] = {"action_type": "Tahan", "quantity": 0}
             st.session_state["sim_pending_orders"] = pending
             st.rerun()
