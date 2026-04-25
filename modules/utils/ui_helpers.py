@@ -119,18 +119,14 @@ def render_top_nav(current: str, enabled_map: dict) -> str:
     for (label, key), col in zip(NAV_ITEMS, cols):
         with col:
             is_active = (current == label)
-            enabled = enabled_map.get(label, True)
             btn_label = f"**{label}**" if is_active else label
-            if enabled:
-                if st.button(
-                    btn_label,
-                    key=f"cdt_nav_{key}",
-                    use_container_width=True,
-                    type="primary" if is_active else "secondary",
-                ):
-                    clicked = label
-            else:
-                st.caption(f"🔒 {label}")
+            if st.button(
+                btn_label,
+                key=f"cdt_nav_{key}",
+                use_container_width=True,
+                type="primary" if is_active else "secondary",
+            ):
+                clicked = label
     return clicked or current
 
 
