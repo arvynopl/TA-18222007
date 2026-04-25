@@ -767,14 +767,38 @@ def render_simulation_page() -> None:
         if pending:
             st.divider()
             st.markdown("**Keputusan Putaran Ini:**")
-            for sid, order in pending.items():
-                ticker_label = sid.split(".")[0]
-                if order["action_type"] == "Tahan":
-                    st.caption(f"-- **{ticker_label}**: Tahan")
-                else:
+            # Running cash simulation across queued orders to show cumulative impact
+            simulated_cash = available_cash
+            for sid_o, order in pending.items():
+                ticker_label = sid_o.split(".")[0]
+                price = current_prices.get(sid_o, 0.0)
+                qty = order.get("quantity", 0)
+                atype = order["action_type"]
+
+                if atype == "Tahan":
+                    st.caption(f"— **{ticker_label}**: Tahan")
+                elif atype == "Jual" and qty > 0 and price > 0:
+                    proceeds = price * qty
+                    simulated_cash += proceeds
                     st.caption(
-                        f"**{ticker_label}**: {order['action_type']} {order['quantity']} lbr"
+                        f"**{ticker_label}**: Jual {qty} lbr  "
+                        f"(+Rp {proceeds:,.0f})  •  Kas: Rp {simulated_cash:,.0f}"
                     )
+                elif atype == "Beli" and qty > 0 and price > 0:
+                    cost = price * qty
+                    simulated_cash -= cost
+                    st.caption(
+                        f"**{ticker_label}**: Beli {qty} lbr  "
+                        f"(−Rp {cost:,.0f})  •  Kas: Rp {simulated_cash:,.0f}"
+                    )
+                else:
+                    st.caption(f"**{ticker_label}**: {atype} {qty} lbr")
+
+            # Summary line for total projected cash after all orders execute
+            if any(o["action_type"] != "Tahan" for o in pending.values()):
+                st.caption(
+                    f"**Estimasi kas setelah semua antrean:** Rp {simulated_cash:,.0f}"
+                )
 
     with col_right:
         sid = selected_stock
