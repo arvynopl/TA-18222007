@@ -6,6 +6,17 @@ echo ""
 
 echo "Checking Python version..."
 python3 --version
+python3 - <<'PYCHECK'
+import sys
+required = (3, 10)
+if sys.version_info < required:
+    sys.stderr.write(
+        f"ERROR: Python {required[0]}.{required[1]}+ diperlukan, tetapi {sys.version.split()[0]} terdeteksi.\n"
+        "       Codebase CDT menggunakan sintaks PEP 604 ('X | None') saat runtime.\n"
+        "       Pasang Python yang lebih baru (mis. via pyenv) lalu jalankan ulang setup.sh.\n"
+    )
+    sys.exit(1)
+PYCHECK
 
 echo ""
 echo "Installing dependencies..."
