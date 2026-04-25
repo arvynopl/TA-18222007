@@ -4,6 +4,7 @@ modules/utils/ui_helpers.py — shared UI components and styling for the CDT sys
 All text is in Bahasa Indonesia (EYD V). The palette is tuned for a white
 background with WCAG AA contrast against #FFFFFF.
 """
+from __future__ import annotations
 
 import streamlit as st
 import plotly.graph_objects as go
