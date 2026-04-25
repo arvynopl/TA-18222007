@@ -109,7 +109,7 @@ def _render_header() -> None:
 
     current = st.session_state["current_page"]
 
-    title_col, user_col = st.columns([4, 2])
+    title_col, user_col = st.columns([5, 1])
     with title_col:
         st.markdown("### Kenali Pola Investasi Anda")
         st.caption(
@@ -118,12 +118,18 @@ def _render_header() -> None:
         )
     with user_col:
         if st.session_state.get("user_alias"):
+            alias = st.session_state["user_alias"]
             st.markdown(
-                f"<div style='text-align:right; padding-top:6px;'>"
-                f"<b>{st.session_state['user_alias']}</b></div>",
+                f"""
+                <div style='display:flex; flex-direction:column;
+                            align-items:flex-end; gap:4px; padding-top:4px;'>
+                    <span style='font-weight:600; font-size:14px;
+                                 color:#1C1E21;'>{alias}</span>
+                </div>
+                """,
                 unsafe_allow_html=True,
             )
-            if st.button("Keluar", key="cdt_logout", use_container_width=True):
+            if st.button("Keluar", key="cdt_logout"):
                 _logout()
                 st.rerun()
 
@@ -541,7 +547,27 @@ def _page_profil() -> None:
             }
 
     if profile_data is None:
-        st.info("Selesaikan minimal satu sesi simulasi untuk melihat profil kognitif Anda.")
+        st.markdown(
+            """
+            <div style='border:1px solid #E5E7EB; border-radius:12px;
+                        padding:32px; text-align:center; background:#FAFAFA;
+                        margin-top:24px;'>
+                <div style='font-size:36px; margin-bottom:12px;'>🧠</div>
+                <div style='font-size:20px; font-weight:600;
+                            color:#111827; margin-bottom:8px;'>
+                    Profil Kognitif Belum Terbentuk
+                </div>
+                <div style='font-size:14px; color:#6B7280; margin-bottom:24px;'>
+                    Profil Kognitif Digital Twin Anda akan terbentuk setelah
+                    menyelesaikan sesi simulasi pertama.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if st.button("Mulai Sesi Simulasi →", type="primary", key="gate_profil_cta"):
+            st.session_state["current_page"] = "Simulasi Investasi"
+            st.rerun()
         return
 
     from modules.utils.ui_helpers import (
@@ -733,7 +759,27 @@ def _page_hasil() -> None:
 
     session_id = st.session_state.get("last_session_id")
     if not session_id:
-        st.info("Selesaikan sesi simulasi terlebih dahulu untuk melihat hasil analisis.")
+        st.markdown(
+            """
+            <div style='border:1px solid #E5E7EB; border-radius:12px;
+                        padding:32px; text-align:center; background:#FAFAFA;
+                        margin-top:24px;'>
+                <div style='font-size:36px; margin-bottom:12px;'>📊</div>
+                <div style='font-size:20px; font-weight:600;
+                            color:#111827; margin-bottom:8px;'>
+                    Belum Ada Hasil Analisis
+                </div>
+                <div style='font-size:14px; color:#6B7280; margin-bottom:24px;'>
+                    Selesaikan minimal satu sesi simulasi investasi untuk
+                    melihat analisis bias dan umpan balik Anda.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if st.button("Mulai Sesi Simulasi →", type="primary", key="gate_hasil_cta"):
+            st.session_state["current_page"] = "Simulasi Investasi"
+            st.rerun()
         return
 
     render_feedback_page(user_id=user_id, session_id=session_id)
