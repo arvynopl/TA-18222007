@@ -18,8 +18,6 @@ Slot placeholders (Python .format() style):
     {counterfactual_text}  (severe templates only)
 """
 
-from __future__ import annotations
-
 TEMPLATES: dict[str, dict[str, dict[str, str]]] = {
 
     # -----------------------------------------------------------------------

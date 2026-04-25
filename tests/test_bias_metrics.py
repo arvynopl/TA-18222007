@@ -8,8 +8,6 @@ Critical test scenarios:
     - test_ci_*:                bootstrapped confidence-interval properties
 """
 
-from __future__ import annotations
-
 import uuid
 from datetime import date, timedelta
 
