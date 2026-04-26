@@ -639,12 +639,19 @@ def render_simulation_page() -> None:
 
     round_data = {sid: window[sid][current_round - 1] for sid in stock_ids}
 
-    # BALANCE-01: deduct pending buy orders from displayed/usable cash
+    # BALANCE-01: compute net impact of all queued orders this round.
+    # available_cash (for max_buy validation) still deducts pending buys only.
     pending_buy_cost = sum(
         order["quantity"] * round_data[sid]["close"]
         for sid, order in pending.items()
         if order.get("action_type") == "Beli" and sid in round_data
     )
+    pending_sell_proceeds = sum(
+        order["quantity"] * round_data[sid]["close"]
+        for sid, order in pending.items()
+        if order.get("action_type") == "Jual" and sid in round_data
+    )
+    net_pending = pending_sell_proceeds - pending_buy_cost
     available_cash = portfolio.cash - pending_buy_cost
 
     current_prices = {sid: round_data[sid]["close"] for sid in stock_ids}
@@ -664,18 +671,25 @@ def render_simulation_page() -> None:
         delta=f"{delta_pct:+.1f}%",
         delta_color="normal",
     )
+    # Determine whether any non-hold orders are queued
+    _has_active_orders = any(
+        o.get("action_type") != "Tahan" for o in pending.values()
+    ) if pending else False
+    _net_sign = "+" if net_pending >= 0 else "−"
+    _net_abs = abs(net_pending)
+
     c_cash.metric(
         "Kas Tersedia",
-        _format_rupiah(available_cash),
+        _format_rupiah(portfolio.cash),   # always shows actual cash on hand
         delta=(
-            f"Antrean beli: -{_format_rupiah(pending_buy_cost)}"
-            if pending_buy_cost > 0 else " "
+            f"Dampak Antrean: {_net_sign}{_format_rupiah(_net_abs)}"
+            if _has_active_orders else " "
         ),
-        delta_color="off",
+        delta_color="normal" if net_pending >= 0 else "inverse",
         help=(
-            f"Kas setelah dikurangi antrean beli aktif ({_format_rupiah(pending_buy_cost)})."
-            if pending_buy_cost > 0 else
-            "Kas tunai yang tersedia untuk pembelian saham."
+            "Kas tunai yang Anda miliki saat ini. "
+            "'Dampak Antrean' adalah selisih neto semua order yang menunggu eksekusi "
+            "(penjualan menambah, pembelian mengurangi)."
         ),
     )
     c_rpnl.metric(
@@ -767,8 +781,10 @@ def render_simulation_page() -> None:
         if pending:
             st.divider()
             st.markdown("**Keputusan Putaran Ini:**")
-            # Running cash simulation across queued orders to show cumulative impact
-            simulated_cash = available_cash
+            # Simulate cash from scratch — start from actual portfolio.cash
+            # so sell proceeds and buy costs are accounted once each.
+            _sim_cash = portfolio.cash
+            _has_non_hold = False
             for sid_o, order in pending.items():
                 ticker_label = sid_o.split(".")[0]
                 price = current_prices.get(sid_o, 0.0)
@@ -779,25 +795,24 @@ def render_simulation_page() -> None:
                     st.caption(f"— **{ticker_label}**: Tahan")
                 elif atype == "Jual" and qty > 0 and price > 0:
                     proceeds = price * qty
-                    simulated_cash += proceeds
-                    st.caption(
-                        f"**{ticker_label}**: Jual {qty} lbr  "
-                        f"(+Rp {proceeds:,.0f})  •  Kas: Rp {simulated_cash:,.0f}"
-                    )
+                    _sim_cash += proceeds
+                    _has_non_hold = True
+                    st.caption(f"**{ticker_label}**: Jual {qty} lbr (+Rp {proceeds:,.0f})")
                 elif atype == "Beli" and qty > 0 and price > 0:
                     cost = price * qty
-                    simulated_cash -= cost
-                    st.caption(
-                        f"**{ticker_label}**: Beli {qty} lbr  "
-                        f"(−Rp {cost:,.0f})  •  Kas: Rp {simulated_cash:,.0f}"
-                    )
+                    _sim_cash -= cost
+                    _has_non_hold = True
+                    st.caption(f"**{ticker_label}**: Beli {qty} lbr (−Rp {cost:,.0f})")
                 else:
                     st.caption(f"**{ticker_label}**: {atype} {qty} lbr")
 
-            # Summary line for total projected cash after all orders execute
-            if any(o["action_type"] != "Tahan" for o in pending.values()):
-                st.caption(
-                    f"**Estimasi kas setelah semua antrean:** Rp {simulated_cash:,.0f}"
+            # Final estimated cash — only show when there are actionable orders
+            if _has_non_hold:
+                _color = "color:#0F9D58;" if _sim_cash >= 0 else "color:#D93025;"
+                st.markdown(
+                    f"<div style='font-size:12px; margin-top:6px; {_color}'>"
+                    f"<b>Estimasi kas setelah eksekusi: Rp {_sim_cash:,.0f}</b></div>",
+                    unsafe_allow_html=True,
                 )
 
     with col_right:
@@ -929,8 +944,16 @@ def render_simulation_page() -> None:
             held = portfolio.holdings.get(sid)
             quantity = 0
             if action_type == "Beli":
-                max_buy = int(available_cash // snap["close"]) if snap["close"] > 0 else 0
-                default_qty = existing_order.get("quantity", 0) if existing_order.get("action_type") == "Beli" else 0
+                # If this stock already has a pending buy, its cost is already
+                # deducted from available_cash. Refund it so the user can keep
+                # or increase their existing order without it being silently capped.
+                _existing_buy_qty = (
+                    existing_order.get("quantity", 0)
+                    if existing_order.get("action_type") == "Beli" else 0
+                )
+                _refund = _existing_buy_qty * snap["close"]
+                max_buy = int((available_cash + _refund) // snap["close"]) if snap["close"] > 0 else 0
+                default_qty = _existing_buy_qty
                 quantity = st.number_input(
                     "Jumlah lembar",
                     min_value=0,
@@ -942,7 +965,6 @@ def render_simulation_page() -> None:
                 if quantity > 0:
                     cost = quantity * snap["close"]
                     st.caption(f"Estimasi biaya: {_format_rupiah(cost)}")
-                    st.caption(f"Setelah eksekusi: Kas = {_format_rupiah(portfolio.cash - cost)}")
             elif action_type == "Jual":
                 max_sell = held.quantity if held else 0
                 default_qty = existing_order.get("quantity", 0) if existing_order.get("action_type") == "Jual" else 0
@@ -961,8 +983,8 @@ def render_simulation_page() -> None:
                     remaining_qty = held.quantity - quantity
                     st.caption(f"Estimasi P&L: {pnl_sign}{_format_rupiah(pnl_est)}")
                     st.caption(
-                        f"Setelah eksekusi: Kas = {_format_rupiah(portfolio.cash + proceeds)}"
-                        + (f", Sisa = {remaining_qty} lbr" if remaining_qty > 0 else ", Posisi ditutup")
+                        f"Sisa posisi: {remaining_qty} lbr" if remaining_qty > 0
+                        else "Posisi akan ditutup sepenuhnya."
                     )
             else:
                 st.caption("Anda memilih **Tahan** — tidak ada transaksi untuk saham ini.")
