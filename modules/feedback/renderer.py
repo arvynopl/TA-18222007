@@ -392,17 +392,35 @@ def render_interaction_profile(user_id: int, snapshots_data: list[dict]) -> None
             """
             **Rumus:** r(X, Y) = Σ[(Xᵢ − X̄)(Yᵢ − Ȳ)] / [(n−1) · σₓ · σᵧ]
 
-            **Interpretasi:**
+            **Interpretasi** (mengikuti konvensi besaran efek Cohen, 1988):
             - |r| < 0.30 → korelasi lemah (tidak ada pola gabungan signifikan)
             - 0.30 ≤ |r| < 0.70 → korelasi moderat
             - |r| ≥ 0.70 → korelasi kuat (bias cenderung muncul bersama)
 
             Korelasi dihitung dari riwayat bias lintas sesi Anda menggunakan
-            window `CDT_STABILITY_WINDOW` sesi terakhir. Pendekatan ini mengadaptasi
-            metode analisis perilaku investor dari **Barber & Odean (2000)** dan
-            **Shefrin & Statman (1985)** ke dalam kerangka *Cognitive Digital Twin*.
+            window `CDT_STABILITY_WINDOW` sesi terakhir.
+
+            **Landasan teoretis ko-okurensi bias:** Pompian (2012) dan
+            Hoffmann & Post (2014) mendokumentasikan bahwa bias perilaku jarang
+            muncul terisolasi — *overconfidence* sering berkorelasi dengan
+            *disposition effect* karena keduanya berakar pada atribusi-diri yang
+            asimetris. Pendekatan ini diadaptasi ke dalam kerangka
+            *Cognitive Digital Twin*.
+
+            **Caveat statistik:** Dengan n = 5 sesi (minimum), interval kepercayaan
+            koefisien r sangat lebar (CI95% bisa ± 0.7). Korelasi pada n < 10
+            bersifat *eksploratif*. Untuk *robustness*, koefisien Spearman ρ
+            direkomendasikan sebagai pelengkap karena tidak mengasumsikan
+            linearitas/normalitas distribusi.
 
             **Referensi:**
+            - Cohen, J. (1988). *Statistical power analysis for the behavioral
+              sciences* (2nd ed.). Lawrence Erlbaum.
+            - Pompian, M. M. (2012). *Behavioral finance and wealth management*
+              (2nd ed.). Wiley.
+            - Hoffmann, A. O. I., & Post, T. (2014). *Self-attribution bias in
+              consumer financial decision-making.* Journal of Behavioral and
+              Experimental Economics, 52, 23–28.
             - Barber, B. M., & Odean, T. (2000). *Trading is hazardous to your wealth.*
               Journal of Finance, 55(2), 773–806.
             - Shefrin, H., & Statman, M. (1985). *The disposition to sell winners too early
@@ -566,6 +584,20 @@ def render_anomaly_detection_profile(user_id: int, session_count: int) -> None:
             - Skor lebih negatif → sesi lebih anomali dibanding baseline pribadi Anda
             - Threshold: skor < 0 → sesi diflag sebagai anomali
             - `contamination = 0.10`: asumsi ~10% sesi adalah outlier struktural
+
+            **Hiperparameter:** `n_estimators=100`, `max_samples=min(256, n)`
+            (default scikit-learn per Liu et al., 2008). `contamination=0.10`
+            berfungsi sebagai *prior* yang mengasumsikan ~10% sesi adalah outlier
+            struktural — dapat dikalibrasi ulang seiring akumulasi data.
+
+            **Validitas statistik:** Skor IF menjadi stabil pada n ≥ 20 sesi per
+            pengguna. Untuk n < 10, skor anomali bersifat *indikatif* dan tidak
+            dijadikan dasar kesimpulan tunggal.
+
+            **Justifikasi pelatihan per-user:** Bias dasar (*baseline bias
+            intensity*) heterogen antar pengguna; pelatihan populasi akan
+            menutupi penyimpangan individual yang justru menjadi target deteksi
+            dalam kerangka *Cognitive Digital Twin*.
 
             **Catatan penting:** Deteksi ini bersifat *per-user* — bukan dibandingkan
             dengan pengguna lain, melainkan dibandingkan dengan **pola Anda sendiri**.
@@ -749,6 +781,13 @@ _BIAS_FORMULA = {
         "interpretation": (
             "DEI > 0: kecenderungan merealisasi keuntungan lebih cepat dari kerugian. "
             "DEI < 0: pola berlawanan (jarang). |DEI| ≥ 0.50 dikategorikan Berat."
+            "<br><br>"
+            "Realized Gains/Losses dihitung sebagai jumlah <b>posisi</b> menang/rugi yang "
+            "direalisasikan (dijual); Paper Gains/Losses sebagai jumlah posisi menang/rugi "
+            "yang masih dipegang pada tiap putaran (mengikuti konstruksi <i>count-based</i> "
+            "Odean, 1998 — bukan nilai rupiah). Threshold |DEI| ≥ 0.50 adalah kalibrasi "
+            "untuk simulasi 14-putaran, bukan baseline empiris pasar ritel "
+            "(yang ≈ 0.05 menurut Odean, 1998)."
         ),
         "citation": "Odean, T. (1998). *Are investors reluctant to realize their losses?* "
                     "Journal of Finance, 53(5), 1775–1798.",
@@ -765,9 +804,24 @@ _BIAS_FORMULA = {
             "OCS tinggi tanpa return proporsional mengindikasikan kepercayaan diri "
             "berlebih: banyak bertransaksi tetapi tidak menghasilkan performa optimal. "
             "OCS ≥ 0.70 dikategorikan Berat."
+            "<br><br>"
+            "<i>Catatan metodologi:</i> Rumus ini adalah operasionalisasi <b>adaptif</b> "
+            "dari kerangka Barber & Odean (2000), yang menunjukkan bahwa investor yang "
+            "lebih sering bertransaksi memperoleh return bersih lebih rendah — tanda "
+            "klasik <i>miscalibration</i> (Glaser & Weber, 2007). Kompresi sigmoid "
+            "membatasi output ke [0, 1) untuk komparabilitas lintas-sesi. Lapis "
+            "<code>max(·, 0.01)</code> berfungsi ganda: mencegah pembagian nol "
+            "<b>dan</b> menjadikan return negatif sebagai sinyal <i>overconfidence</i> "
+            "terkuat (konsisten dengan Odean, 1999)."
         ),
-        "citation": "Barber, B. M., & Odean, T. (2000). *Trading is hazardous to your wealth.* "
-                    "Journal of Finance, 55(2), 773–806.",
+        "citation": (
+            "<br>• Barber, B. M., & Odean, T. (2000). *Trading is hazardous to your wealth.* "
+            "Journal of Finance, 55(2), 773–806."
+            "<br>• Odean, T. (1999). *Do investors trade too much?* "
+            "American Economic Review, 89(5), 1279–1298."
+            "<br>• Glaser, M., & Weber, M. (2007). *Overconfidence and trading volume.* "
+            "Geneva Risk and Insurance Review, 32(1), 1–36."
+        ),
     },
     "loss_aversion": {
         "name_en": "Loss Aversion Index (LAI)",
@@ -779,9 +833,29 @@ _BIAS_FORMULA = {
         "interpretation": (
             "LAI > 1.0: Anda menahan posisi merugi lebih lama dari posisi untung. "
             "LAI ≥ 2.0 dikategorikan Berat dan mencerminkan asimetri perilaku signifikan."
+            "<br><br>"
+            "<i>Landasan teoretis:</i> LAI mengoperasionalisasikan asimetri "
+            "<i>holding-time</i> sebagai manifestasi <b>perilaku</b> dari <i>loss "
+            "aversion</i> (Kahneman & Tversky, 1979; Tversky & Kahneman, 1992). "
+            "Konstruksi rasio rata-rata waktu tahan posisi rugi vs. untung secara "
+            "empiris diperkenalkan oleh Shefrin & Statman (1985) sebagai indikator "
+            "<i>disposition effect</i> berakar pada prospect theory. LAI di sini "
+            "berbeda dari koefisien λ (≈ 2.25 menurut Tversky & Kahneman, 1992) "
+            "yang mengukur kurvatur fungsi utilitas — LAI adalah proxy "
+            "<i>behavioral</i>, bukan parameter <i>value function</i>."
+            "<br><br>"
+            "Lapis <code>max(avg_hold_winners, 1.0)</code> mencegah pembagian nol "
+            "pada sesi tanpa posisi untung yang ditahan ≥ 1 putaran."
         ),
-        "citation": "Kahneman, D., & Tversky, A. (1979). *Prospect theory: An analysis of "
-                    "decision under risk.* Econometrica, 47(2), 263–291.",
+        "citation": (
+            "<br>• Kahneman, D., & Tversky, A. (1979). *Prospect theory: An analysis "
+            "of decision under risk.* Econometrica, 47(2), 263–291."
+            "<br>• Tversky, A., & Kahneman, D. (1992). *Advances in prospect theory: "
+            "Cumulative representation of uncertainty.* Journal of Risk and "
+            "Uncertainty, 5(4), 297–323."
+            "<br>• Shefrin, H., & Statman, M. (1985). *The disposition to sell winners "
+            "too early and ride losers too long.* Journal of Finance, 40(3), 777–790."
+        ),
     },
 }
 
