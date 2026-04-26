@@ -682,13 +682,13 @@ def render_simulation_page() -> None:
         "Kas Tersedia",
         _format_rupiah(portfolio.cash),   # always shows actual cash on hand
         delta=(
-            f"Dampak Antrean: {_net_sign}{_format_rupiah(_net_abs)}"
+            f"Total Antrean: {_net_sign}{_format_rupiah(_net_abs)}"
             if _has_active_orders else " "
         ),
-        delta_color="normal" if net_pending >= 0 else "inverse",
+        delta_color="off",
         help=(
             "Kas tunai yang Anda miliki saat ini. "
-            "'Dampak Antrean' adalah selisih neto semua order yang menunggu eksekusi "
+            "'Total Antrean' adalah selisih neto semua order yang menunggu eksekusi "
             "(penjualan menambah, pembelian mengurangi)."
         ),
     )
@@ -792,7 +792,7 @@ def render_simulation_page() -> None:
                 atype = order["action_type"]
 
                 if atype == "Tahan":
-                    st.caption(f"— **{ticker_label}**: Tahan")
+                    pass   # Hold is default — not shown in the order summary
                 elif atype == "Jual" and qty > 0 and price > 0:
                     proceeds = price * qty
                     _sim_cash += proceeds
