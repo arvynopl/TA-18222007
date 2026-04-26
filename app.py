@@ -119,19 +119,21 @@ def _render_header() -> None:
     with user_col:
         if st.session_state.get("user_alias"):
             alias = st.session_state["user_alias"]
-            st.markdown(
-                f"""
-                <div style='display:flex; flex-direction:column;
-                            align-items:flex-end; gap:4px; padding-top:4px;'>
-                    <span style='font-weight:600; font-size:14px;
-                                 color:#1C1E21;'>{alias}</span>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            if st.button("Keluar", key="cdt_logout"):
-                _logout()
-                st.rerun()
+            # Identity cluster: logout button and username on the same horizontal level.
+            # CSS flex row — button on the left, username label on the right.
+            # The button is rendered via st.button (interactive); the username
+            # label sits alongside it via a negative-margin markdown trick.
+            btn_col, name_col = st.columns([1, 1])
+            with btn_col:
+                if st.button("Keluar", key="cdt_logout"):
+                    _logout()
+                    st.rerun()
+            with name_col:
+                st.markdown(
+                    f"<div style='padding-top:8px; font-size:13px; color:#5F6368;'>"
+                    f"Pengguna: <b style='color:#1C1E21;'>{alias}</b></div>",
+                    unsafe_allow_html=True,
+                )
 
     render_mobile_banner()
 
@@ -494,6 +496,10 @@ def _render_auth_stage_register() -> None:
 # ---------------------------------------------------------------------------
 def _page_profil() -> None:
     st.title("Profil Kognitif Saya")
+    st.caption(
+        "Representasi adaptif pola pengambilan keputusan investasi Anda, "
+        "diperbarui setelah setiap sesi. Tersedia setelah sesi pertama selesai."
+    )
 
     user_id = st.session_state.get("user_id")
     if not user_id:
@@ -557,7 +563,7 @@ def _page_profil() -> None:
                             color:#111827; margin-bottom:8px;'>
                     Profil Kognitif Belum Terbentuk
                 </div>
-                <div style='font-size:14px; color:#6B7280; margin-bottom:24px;'>
+                <div style='font-size:14px; color:#6B7280; margin-bottom:0px;'>
                     Profil Kognitif Digital Twin Anda akan terbentuk setelah
                     menyelesaikan sesi simulasi pertama.
                 </div>
@@ -565,6 +571,7 @@ def _page_profil() -> None:
             """,
             unsafe_allow_html=True,
         )
+        st.markdown("<div style='margin-top:20px;'></div>", unsafe_allow_html=True)
         if st.button("Mulai Sesi Simulasi →", type="primary", key="gate_profil_cta"):
             st.session_state["current_page"] = "Simulasi Investasi"
             st.rerun()
@@ -719,6 +726,12 @@ def _page_profil() -> None:
             st.session_state["current_page"] = "Simulasi Investasi"
             st.rerun()
 
+    from modules.feedback.renderer import render_interaction_profile
+    render_interaction_profile(user_id, snapshots_data)
+
+    from modules.feedback.renderer import render_anomaly_detection_profile
+    render_anomaly_detection_profile(user_id, profile_data["session_count"])
+
     st.divider()
     st.subheader("Ekspor Data")
     st.caption("Unduh data sesi untuk evaluasi dan analisis lebih lanjut.")
@@ -752,12 +765,28 @@ def _page_profil() -> None:
 # Page: Hasil Analisis
 # ---------------------------------------------------------------------------
 def _page_hasil() -> None:
+    st.title("Hasil Analisis & Umpan Balik")
+    st.caption("Ringkasan bias kognitif, performa finansial, dan rekomendasi sesi terkini Anda.")
+
     user_id = st.session_state.get("user_id")
     if not user_id:
         st.warning("Silakan masuk terlebih dahulu.")
         return
 
+    # Use last_session_id from state; fall back to most recent completed session
+    # in the database so returning users can always see their last feedback.
     session_id = st.session_state.get("last_session_id")
+    if not session_id and user_id:
+        with get_session() as sess:
+            last_metric = (
+                sess.query(BiasMetric)
+                .filter_by(user_id=user_id)
+                .order_by(BiasMetric.computed_at.desc())
+                .first()
+            )
+            if last_metric:
+                session_id = last_metric.session_id
+
     if not session_id:
         st.markdown(
             """
@@ -769,7 +798,7 @@ def _page_hasil() -> None:
                             color:#111827; margin-bottom:8px;'>
                     Belum Ada Hasil Analisis
                 </div>
-                <div style='font-size:14px; color:#6B7280; margin-bottom:24px;'>
+                <div style='font-size:14px; color:#6B7280; margin-bottom:0px;'>
                     Selesaikan minimal satu sesi simulasi investasi untuk
                     melihat analisis bias dan umpan balik Anda.
                 </div>
@@ -777,6 +806,7 @@ def _page_hasil() -> None:
             """,
             unsafe_allow_html=True,
         )
+        st.markdown("<div style='margin-top:20px;'></div>", unsafe_allow_html=True)
         if st.button("Mulai Sesi Simulasi →", type="primary", key="gate_hasil_cta"):
             st.session_state["current_page"] = "Simulasi Investasi"
             st.rerun()
