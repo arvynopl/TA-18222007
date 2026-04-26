@@ -610,3 +610,31 @@ def render_coach_mark_onboarding() -> bool:
             st.rerun()
 
     return False
+
+
+# ---------------------------------------------------------------------------
+# Datetime formatting — WIB (UTC+7)
+# ---------------------------------------------------------------------------
+from datetime import timezone as _tz, timedelta as _td
+
+_WIB = _tz(_td(hours=7))
+
+
+def fmt_datetime_wib(dt) -> str:
+    """Format a UTC datetime object to a human-readable WIB string.
+
+    Handles both timezone-aware and timezone-naive datetimes (naive are
+    assumed to be UTC, consistent with the project's convention of using
+    ``datetime.now(timezone.utc)`` everywhere).
+
+    Returns '—' for None inputs.
+
+    Example output: "26 Apr 2026 23:14 WIB"
+    """
+    if dt is None:
+        return "—"
+    if dt.tzinfo is None:
+        # Naive datetime → assume UTC (project convention)
+        dt = dt.replace(tzinfo=_tz.utc)
+    wib_dt = dt.astimezone(_WIB)
+    return wib_dt.strftime("%-d %b %Y %H:%M") + " WIB"
