@@ -34,7 +34,8 @@ from modules.feedback.renderer import render_feedback_page
 from modules.simulation.ui import render_simulation_page
 from modules.utils.log_config import configure_logging
 from modules.utils.ui_helpers import (
-    NAV_ITEMS, inject_custom_css, render_mobile_banner, render_top_nav,
+    NAV_ITEMS, fmt_datetime_wib, inject_custom_css,
+    render_mobile_banner, render_top_nav,
 )
 
 # CDT_DEBUG=1 enables verbose DEBUG logging to app.log
@@ -224,7 +225,7 @@ def _render_beranda_logged_in(user_id: int) -> None:
     c1.metric("Total Sesi Selesai", session_count)
     c2.metric(
         "Sesi Terakhir",
-        last_date.strftime("%d %b %Y %H:%M") if last_date else "—",
+        fmt_datetime_wib(last_date) if last_date else "—",
     )
 
     min_sessions = 3
@@ -713,7 +714,7 @@ def _page_profil() -> None:
             )
 
     if profile_data["last_updated_at"]:
-        st.caption(f"Terakhir diperbarui: {profile_data['last_updated_at'].strftime('%d %b %Y %H:%M')}")
+        st.caption(f"Terakhir diperbarui: {fmt_datetime_wib(profile_data['last_updated_at'])}")
 
     st.divider()
     col_cta1, col_cta2 = st.columns(2)
@@ -799,8 +800,9 @@ def _page_hasil() -> None:
                     Belum Ada Hasil Analisis
                 </div>
                 <div style='font-size:14px; color:#6B7280; margin-bottom:0px;'>
-                    Selesaikan minimal satu sesi simulasi investasi untuk
-                    melihat analisis bias dan umpan balik Anda.
+                    Selesaikan seluruh <b>14 putaran</b> dalam satu sesi
+                    simulasi untuk membuka analisis bias dan umpan balik Anda.
+                    Meninggalkan simulasi di tengah jalan tidak menyimpan hasil.
                 </div>
             </div>
             """,
