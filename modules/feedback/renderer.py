@@ -27,6 +27,7 @@ from modules.feedback.generator import (
 from modules.utils.ui_helpers import (
     BIAS_DESCRIPTIONS,
     BIAS_NAMES,
+    fmt_datetime_wib,
     SEVERITY_BG,
     SEVERITY_COLORS,
     SEVERITY_ICONS,
@@ -461,8 +462,8 @@ def render_interaction_profile(user_id: int, snapshots_data: list[dict]) -> None
             name="Sesi Anda",
         ))
         fig.update_layout(
-            xaxis_title="|Efek Disposisi (DEI)|",
-            yaxis_title="Overconfidence (OCS)",
+            xaxis_title="|Efek Disposisi| (DEI)",
+            yaxis_title="Keyakinan Berlebih (OCS)",
             height=400,
             margin=dict(l=10, r=10, t=30, b=10),
             paper_bgcolor="rgba(0,0,0,0)",
@@ -477,9 +478,9 @@ def render_interaction_profile(user_id: int, snapshots_data: list[dict]) -> None
 
     # Pairwise correlation table
     _PAIR_LABELS_ID = {
-        "ocs_dei": ("OCS", "DEI"),
-        "ocs_lai": ("OCS", "LAI"),
-        "dei_lai": ("DEI", "LAI"),
+        "ocs_dei": ("Keyakinan Berlebih", "Efek Disposisi"),
+        "ocs_lai": ("Keyakinan Berlebih", "Hindari Kerugian"),
+        "dei_lai": ("Efek Disposisi", "Hindari Kerugian"),
     }
     if interaction_scores:
         st.markdown("**Koefisien Korelasi Pearson Antar-Bias:**")
@@ -557,9 +558,9 @@ def render_anomaly_detection_profile(user_id: int, session_count: int) -> None:
             di pohon), sehingga menghasilkan skor anomali lebih negatif.
 
             **Fitur yang digunakan (3 dimensi, dinormalisasi ke [0, 1]):**
-            - OCS (Overconfidence Score)
-            - |DEI| (Efek Disposisi, nilai absolut)
-            - LAI_norm = min(LAI / LAI_ceiling, 1.0)
+            - **Keyakinan Berlebih** (OCS — Overconfidence Score)
+            - **|Efek Disposisi|** (|DEI| — nilai absolut)
+            - **Hindari Kerugian** (LAI_norm = min(LAI / LAI_ceiling, 1.0))
 
             **Interpretasi skor:**
             - Skor lebih negatif → sesi lebih anomali dibanding baseline pribadi Anda
@@ -883,9 +884,9 @@ def _render_session_results(
     # --- Bias severity pills ---
     pill_cols = st.columns(3)
     pill_labels = [
-        ("DEI", bias_results["dei"][1]),
-        ("OCS", bias_results["ocs"][1]),
-        ("LAI", bias_results["lai"][1]),
+        ("Efek Disposisi", bias_results["dei"][1]),
+        ("Keyakinan Berlebih", bias_results["ocs"][1]),
+        ("Hindari Kerugian", bias_results["lai"][1]),
     ]
     for col, (badge_key, sev) in zip(pill_cols, pill_labels):
         color, bg = _PILL_SEVERITY_COLOR.get(sev, ("#78909c", "rgba(120,144,156,0.15)"))
@@ -907,7 +908,16 @@ def render_feedback_page(user_id: int, session_id: str) -> None:
         user_id:    ID of the user.
         session_id: UUID string of the just-completed session.
     """
-    st.caption(f"Sesi: {session_id[:8]}…")
+    # Pull computed_at from BiasMetric for the WIB timestamp
+    with get_session() as _ts_sess:
+        _bm = (
+            _ts_sess.query(BiasMetric)
+            .filter_by(user_id=user_id, session_id=session_id)
+            .first()
+        )
+        _computed_at = _bm.computed_at if _bm else None
+    _ts_str = fmt_datetime_wib(_computed_at) if _computed_at else "—"
+    st.caption(f"Sesi: `{session_id[:8]}…`  ·  Diselesaikan: {_ts_str}")
 
     with get_session() as sess:
         raw_feedbacks = get_session_feedback(sess, user_id, session_id)
@@ -946,21 +956,21 @@ def render_feedback_page(user_id: int, session_id: str) -> None:
     g1, g2, g3 = st.columns(3)
     with g1:
         sev = classify_severity(metric_data["ocs"], OCS_SEVERE, OCS_MODERATE, OCS_MILD)
-        fig = build_severity_gauge(metric_data["ocs"], 1.0, "Overconfidence", sev)
+        fig = build_severity_gauge(metric_data["ocs"], 1.0, "Keyakinan Berlebih (OCS)", sev)
         st.plotly_chart(fig, use_container_width=True)
         st.caption(
             f"Ambang batas — Ringan: >{OCS_MILD} | Sedang: >{OCS_MODERATE} | Berat: >{OCS_SEVERE}"
         )
     with g2:
         sev = classify_severity(metric_data["dei"], DEI_SEVERE, DEI_MODERATE, DEI_MILD)
-        fig = build_severity_gauge(metric_data["dei"], 1.0, "Efek Disposisi", sev)
+        fig = build_severity_gauge(metric_data["dei"], 1.0, "Efek Disposisi (DEI)", sev)
         st.plotly_chart(fig, use_container_width=True)
         st.caption(
             f"Ambang batas — Ringan: >{DEI_MILD} | Sedang: >{DEI_MODERATE} | Berat: >{DEI_SEVERE}"
         )
     with g3:
         sev = classify_severity(metric_data["lai"], LAI_SEVERE, LAI_MODERATE, LAI_MILD)
-        fig = build_severity_gauge(metric_data["lai"], 3.0, "Loss Aversion", sev)
+        fig = build_severity_gauge(metric_data["lai"], 3.0, "Hindari Kerugian (LAI)", sev)
         st.plotly_chart(fig, use_container_width=True)
         st.caption(
             f"Ambang batas — Ringan: >{LAI_MILD}× | Sedang: >{LAI_MODERATE}× | Berat: >{LAI_SEVERE}×  "
