@@ -57,6 +57,40 @@ st.set_page_config(
 
 
 # ---------------------------------------------------------------------------
+# Streamlit Cloud safety guard
+# ---------------------------------------------------------------------------
+# On Streamlit Community Cloud the container filesystem is ephemeral. If
+# CDT_DATABASE_URL is unset the app would silently fall back to a local
+# SQLite file and lose every write on the next redeploy. Refuse to start
+# in that scenario rather than corrupting UAT data.
+def _looks_like_streamlit_cloud() -> bool:
+    if os.environ.get("STREAMLIT_RUNTIME_ENV") == "cloud":
+        return True
+    if os.environ.get("STREAMLIT_SHARING_MODE"):
+        return True
+    if os.path.exists("/mount/src"):  # Streamlit Cloud working directory
+        return True
+    hostname = os.environ.get("HOSTNAME", "")
+    return "streamlit" in hostname.lower()
+
+
+if _looks_like_streamlit_cloud() and not os.environ.get("CDT_DATABASE_URL"):
+    st.error(
+        "**Konfigurasi belum lengkap.** Variabel `CDT_DATABASE_URL` belum "
+        "diatur pada Streamlit Cloud Secrets. Aplikasi dihentikan untuk "
+        "mencegah kehilangan data: file SQLite lokal pada Streamlit Cloud "
+        "akan terhapus setiap kali container di-redeploy.\n\n"
+        "**Cara memperbaiki:** buka *App settings → Secrets* lalu tambahkan:\n\n"
+        "```toml\n"
+        'CDT_DATABASE_URL = "postgresql://<user>:<pass>@<host>.neon.tech/<db>?sslmode=require"\n'
+        "```\n\n"
+        "Lihat `README_DEPLOY.md` untuk panduan lengkap."
+    )
+    logger.error("Refusing to start on Streamlit Cloud without CDT_DATABASE_URL set.")
+    st.stop()
+
+
+# ---------------------------------------------------------------------------
 # One-time DB init (idempotent)
 # ---------------------------------------------------------------------------
 @st.cache_resource
