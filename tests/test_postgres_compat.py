@@ -61,7 +61,9 @@ def cleanup_ids():
     yield created
 
     from database.connection import get_session
-    from database.models import MarketSnapshot, StockCatalog, User, UserAction
+    from database.models import (
+        CognitiveProfile, MarketSnapshot, StockCatalog, User, UserAction,
+    )
 
     with get_session() as sess:
         for aid in created["user_action"]:
@@ -70,6 +72,10 @@ def cleanup_ids():
             sess.query(MarketSnapshot).filter_by(id=sid).delete()
         for stock_id in created["stock_catalog"]:
             sess.query(StockCatalog).filter_by(stock_id=stock_id).delete()
+        # Postgres enforces FK constraints; bulk DELETE bypasses ORM cascade,
+        # so child rows referencing User must be removed before the parent.
+        for uid in created["user"]:
+            sess.query(CognitiveProfile).filter_by(user_id=uid).delete()
         for uid in created["user"]:
             sess.query(User).filter_by(id=uid).delete()
 
@@ -99,7 +105,9 @@ def test_seed_stock_catalog_idempotent(pg_engine, cleanup_ids):
     from database.connection import get_session
     from database.models import StockCatalog
 
-    test_ticker = f"PGTEST{uuid.uuid4().hex[:6].upper()}"
+    # Ticker must fit StockCatalog.ticker = String(10). Postgres enforces it
+    # strictly (SQLite silently truncates), so keep the synthetic id ≤ 10 chars.
+    test_ticker = f"PG{uuid.uuid4().hex[:4].upper()}"
     test_stock_id = f"{test_ticker}.JK"
 
     with get_session() as sess:
