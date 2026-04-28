@@ -7,6 +7,18 @@ Usage:
     init_db()                    # Create all tables (idempotent)
     with get_session() as sess:  # Yields a session, commits on exit
         ...
+
+Database URL handling:
+    - sqlite:///<path>           → local file (default for dev/test)
+    - sqlite:///:memory:         → in-memory (used by tests)
+    - postgres://...             → normalized to postgresql+psycopg2://
+    - postgresql://...           → normalized to postgresql+psycopg2://
+    - postgresql+psycopg2://...  → used as-is
+
+Neon (and other managed Postgres providers) typically issue connection strings
+in the legacy ``postgres://`` form. SQLAlchemy 2.x rejects that scheme, so we
+normalise eagerly and force the psycopg2 driver to match the pinned dependency
+in requirements.txt.
 """
 
 from __future__ import annotations
@@ -25,17 +37,37 @@ _engine: Optional[Engine] = None
 _SessionFactory: Optional[sessionmaker] = None
 
 
+def _normalize_db_url(url: str) -> str:
+    """Normalise a database URL for SQLAlchemy 2.x.
+
+    - ``postgres://...`` (Neon, Heroku-style) → ``postgresql://...``
+    - ``postgresql://...`` (no driver) → ``postgresql+psycopg2://...``
+    - All other schemes (sqlite, postgresql+psycopg2, etc.) returned unchanged.
+    """
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://"):]
+    if url.startswith("postgresql://"):
+        url = "postgresql+psycopg2://" + url[len("postgresql://"):]
+    return url
+
+
 def get_engine() -> Engine:
     """Return (and lazily create) the shared SQLAlchemy engine."""
     global _engine
     if _engine is None:
-        connect_args = {}
-        if DATABASE_URL.startswith("sqlite"):
+        url = _normalize_db_url(DATABASE_URL)
+        connect_args: dict = {}
+        engine_kwargs: dict = {"echo": False}
+        if url.startswith("sqlite"):
             connect_args["check_same_thread"] = False
+        else:
+            # Managed Postgres (Neon) closes idle connections aggressively;
+            # pool_pre_ping detects stale connections before they cause errors.
+            engine_kwargs["pool_pre_ping"] = True
         _engine = create_engine(
-            DATABASE_URL,
+            url,
             connect_args=connect_args,
-            echo=False,
+            **engine_kwargs,
         )
     return _engine
 
@@ -45,24 +77,52 @@ def _apply_schema_migrations(engine: Engine) -> None:
 
     Idempotent: skips columns that already exist. Extend this list whenever a
     new column is added to an existing model without a full DB reset.
+
+    Dialect-aware: column DDL is rewritten for Postgres (TIMESTAMPTZ, BOOLEAN,
+    DOUBLE PRECISION) so the same migration list works on both SQLite and
+    Postgres deployments.
     """
     inspector = inspect(engine)
+    is_postgres = engine.dialect.name == "postgresql"
+
+    # Logical type → dialect-specific DDL fragment.
+    if is_postgres:
+        types = {
+            "JSON": "JSON",
+            "FLOAT": "DOUBLE PRECISION",
+            "BOOL": "BOOLEAN",
+            "TIMESTAMP": "TIMESTAMP WITH TIME ZONE",
+            "VARCHAR_24": "VARCHAR(24)",
+            "VARCHAR_64": "VARCHAR(64)",
+            "VARCHAR_128": "VARCHAR(128)",
+        }
+    else:  # sqlite (and any other forgiving dialect)
+        types = {
+            "JSON": "JSON",
+            "FLOAT": "REAL",
+            "BOOL": "INTEGER",
+            "TIMESTAMP": "DATETIME",
+            "VARCHAR_24": "VARCHAR(24)",
+            "VARCHAR_64": "VARCHAR(64)",
+            "VARCHAR_128": "VARCHAR(128)",
+        }
+
     migrations = [
         # (table_name, column_name, column_definition)
-        ("cognitive_profiles", "interaction_scores", "JSON DEFAULT NULL"),
-        ("bias_metrics", "dei_ci_lower", "REAL DEFAULT NULL"),
-        ("bias_metrics", "dei_ci_upper", "REAL DEFAULT NULL"),
-        ("bias_metrics", "ocs_ci_lower", "REAL DEFAULT NULL"),
-        ("bias_metrics", "ocs_ci_upper", "REAL DEFAULT NULL"),
-        ("bias_metrics", "lai_ci_lower", "REAL DEFAULT NULL"),
-        ("bias_metrics", "lai_ci_upper", "REAL DEFAULT NULL"),
-        ("bias_metrics", "ci_low_confidence", "INTEGER DEFAULT NULL"),
+        ("cognitive_profiles", "interaction_scores", f"{types['JSON']} DEFAULT NULL"),
+        ("bias_metrics", "dei_ci_lower", f"{types['FLOAT']} DEFAULT NULL"),
+        ("bias_metrics", "dei_ci_upper", f"{types['FLOAT']} DEFAULT NULL"),
+        ("bias_metrics", "ocs_ci_lower", f"{types['FLOAT']} DEFAULT NULL"),
+        ("bias_metrics", "ocs_ci_upper", f"{types['FLOAT']} DEFAULT NULL"),
+        ("bias_metrics", "lai_ci_lower", f"{types['FLOAT']} DEFAULT NULL"),
+        ("bias_metrics", "lai_ci_upper", f"{types['FLOAT']} DEFAULT NULL"),
+        ("bias_metrics", "ci_low_confidence", f"{types['BOOL']} DEFAULT NULL"),
         # v6 auth fields
-        ("users", "username", "VARCHAR(64) DEFAULT NULL"),
-        ("users", "password_hash", "VARCHAR(128) DEFAULT NULL"),
-        ("users", "last_login_at", "DATETIME DEFAULT NULL"),
+        ("users", "username", f"{types['VARCHAR_64']} DEFAULT NULL"),
+        ("users", "password_hash", f"{types['VARCHAR_128']} DEFAULT NULL"),
+        ("users", "last_login_at", f"{types['TIMESTAMP']} DEFAULT NULL"),
         # v6 survey discriminator
-        ("user_surveys", "survey_type", "VARCHAR(24) DEFAULT 'session_level'"),
+        ("user_surveys", "survey_type", f"{types['VARCHAR_24']} DEFAULT 'session_level'"),
     ]
     with engine.connect() as conn:
         for table, column, col_def in migrations:
