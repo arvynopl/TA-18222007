@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 import pytest
 
 from database.connection import _normalize_db_url
@@ -66,4 +68,4 @@ def test_non_neon_host_skips_validation():
     """Regular Postgres hosts (e.g. RDS) must not trip the Neon-specific check."""
     url = "postgresql://u:p@db.example.com/db"
     out = _normalize_db_url(url)
-    assert "db.example.com" in out
+    assert urlparse(out).hostname == "db.example.com"
