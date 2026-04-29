@@ -1,135 +1,199 @@
-# Mobile Audit Notes — Phase 2 input for Phase 3
+# Mobile Audit Notes — Phase 3 fixes applied
 
-**Status:** Static audit only. Phase 2 introduced no UI changes; this
-document captures observed mobile-layout risks for Phase 3 to fix.
+**Status:** Phase 3 fixes implemented. Phase 2 captured the static
+findings; this file now records the before/after for each.
 
-**Method:** Source inspection of every `st.columns()`, `st.plotly_chart()`,
-`st.dataframe()`, and `st.table()` call site, cross-referenced with the
-existing `render_mobile_banner()` warning that already advises users to
-prefer ≥10-inch screens.
+**Method recap:** every `st.columns()`, `st.plotly_chart()`,
+`st.dataframe()`, `st.table()` call site was reviewed against five
+target viewports (375 / 390 / 412 / 768 / 1440 px). Mobile mode is
+opted-in via the global `Mode mobile` toggle rendered by
+`modules.utils.layout.render_mobile_toggle()` in the page header.
 
-> **Note on browser emulation:** the working environment for this phase
-> does not have Streamlit or a browser available, so the iPhone 14 / Pixel 7
-> screenshots called for in the prompt could not be captured in-session.
-> Phase 3 must reproduce these viewports (375 / 390 / 412 / 768 / 1440 px)
-> in Chrome DevTools and replace the "static finding" rows below with
-> concrete before/after evidence.
-
----
-
-## Target viewport widths (for Phase 3 verification)
-
-| Device          | Width  |
-| --------------- | ------ |
-| iPhone SE       | 375 px |
-| iPhone 14       | 390 px |
-| Pixel 7         | 412 px |
-| iPad Mini       | 768 px |
-| Desktop (1080p) | 1440 px |
+> **Browser-emulation caveat:** the working environment for this phase
+> still does not have a GUI / Chrome DevTools available, so the
+> screenshots called for in the Phase 3 prompt are described
+> textually rather than captured as PNGs. Layout was verified by
+> static inspection plus a runtime check of `_build_full_chart` /
+> `_build_compact_line_chart` returning the expected trace counts and
+> heights (8 traces / 420 px desktop vs 2 traces / 280 px compact).
+> When the live URL is up, repeat the visual smoke test in DevTools.
 
 ---
 
-## Findings
+## Target viewport widths
 
-Each finding lists: **file:line** → pattern → expected mobile breakage.
-None of these are fixed in Phase 2.
+| Device          | Width  | Status after Phase 3 (textual description)                                  |
+| --------------- | ------ | ---------------------------------------------------------------------------- |
+| iPhone SE       | 375 px | Acceptable when *Mode mobile* is on: nav stacks 2x2, KPI strips 2x2, candlestick → line. |
+| iPhone 14       | 390 px | Same as above. *Mode mobile* drives single-col / 2x2 layouts depending on N. |
+| Pixel 7         | 412 px | Same as iPhone 14. Slightly more breathing room on 2-col rows.              |
+| iPad Mini       | 768 px | Above the breakpoint — desktop layout is fine; *Mode mobile* still works if user opts in. |
+| Desktop (1080p) | 1440 px | Unchanged from pre-Phase 3 desktop layout.                                  |
+
+---
+
+## Findings — Phase 3 resolution
 
 ### F1 — Candlestick chart height & responsiveness
 
-- `modules/simulation/ui.py:251` — `apply_chart_theme(fig, height=420)`
-- The candlestick + volume subplot is fixed at 420 px tall regardless of
-  viewport. On a 390 px-wide phone, the chart compresses horizontally
-  while keeping full height, producing illegible candles.
-- **Phase 3 action:** add a viewport-aware height (e.g. 280 px on phone,
-  420 px on desktop) and add an `st.toggle("Tampilan ringkas untuk
-  mobile")` that swaps the candlestick for a single-line close trace.
-  Preserve bias-relevant signal: trajectory shape, MA5/MA20 overlays,
-  volume bar magnitude.
-- Note: `use_container_width=True` is already set at the call site
-  (`modules/simulation/ui.py:907`), so width responsiveness is fine —
-  only height and primitive choice need work.
+**Before:** `modules/simulation/ui.py:_build_full_chart` was always a
+candlestick + volume subplot at fixed 420 px. On a 390 px viewport the
+14 candle bars compress to ~10 px each — illegible — while the chart
+keeps full vertical real estate.
 
-### F2 — High-arity column rows that break below ~600 px
+**After:**
 
-Streamlit's `st.columns(N)` does not collapse on narrow viewports; all
-N columns stay side-by-side and each becomes ~ `viewport / N` wide. On
-a 390 px phone with `N >= 3` each column is < 130 px and content
-truncates or wraps badly.
+- `_build_full_chart` now accepts `compact: bool = False`. On `compact=True`
+  it delegates to a new `_build_compact_line_chart` that renders the
+  closing-price trajectory as a single line at 280 px height. Pre-window
+  history is shown as a muted grey line; the trading window is colored
+  green/red depending on net direction; the "Mulai Trading" boundary
+  marker is preserved so the bias-relevant signal (when did the user
+  start trading) is intact.
+- A per-chart `st.toggle("Tampilan ringkas untuk mobile")` is rendered
+  immediately above the chart (`modules/simulation/ui.py:~999`). Default
+  state matches the global *Mode mobile* flag; the user can override it
+  per chart.
+- `use_container_width=True` was already set at the call site.
 
-| File:line                                       | N | Mitigation needed                                |
-| ----------------------------------------------- | - | ------------------------------------------------ |
-| `app.py:626` `c1, c2, c3 = st.columns(3)`       | 3 | Replace with `responsive_columns(3, mobile=1)`. |
-| `modules/feedback/renderer.py:213` `st.columns(min(n_sessions, 8))` | up to 8 | Worst offender. Wrap each session into 2 rows of 4 on tablet, single column on phone. |
-| `modules/feedback/renderer.py:505` `cols_corr = st.columns(3)` | 3 | Drop to 1 col on phone. |
-| `modules/feedback/renderer.py:632` `col_a, col_b, col_c = st.columns(3)` | 3 | Drop to 1 col on phone. |
-| `modules/feedback/renderer.py:907` `c1, c2, c3, c4 = st.columns(4)` | 4 | Drop to 2 cols on tablet, 1 on phone. |
-| `modules/feedback/renderer.py:959` `pill_cols = st.columns(3)` | 3 | Drop to 1 col on phone. |
-| `modules/feedback/renderer.py:1030` `g1, g2, g3 = st.columns(3)` | 3 | Drop to 1 col on phone. |
-| `modules/feedback/renderer.py:1152` `h1, h2, h3, h4 = st.columns([2,1.5,1.5,2])` | 4 | History table header row. Stack as cards on phone. |
-| `modules/feedback/renderer.py:1161` (loop body) | 4 | Same as above — paired with the header. |
-| `modules/simulation/ui.py:619` `c1, c2, c3 = st.columns(3)` | 3 | Drop to 1 col on phone. |
-| `modules/simulation/ui.py:667` `c_val, c_cash, c_rpnl, c_upnl = st.columns(4)` | 4 | KPI strip. Drop to 2x2 on tablet, 1x4 on phone. |
-| `modules/simulation/ui.py:864` `ind_cols = st.columns(4)` | 4 | Drop to 2x2 on tablet, 1 col on phone. |
-| `modules/utils/ui_helpers.py:117` `cols = st.columns(len(NAV_ITEMS))` | 4 | Top nav. Already protected by the existing mobile banner that asks users to prefer larger screens, but should be made tab-bar-style on phone. |
+**Verification:**
+```
+fig_full.layout.height == 420  (candlestick + volume, 8 traces)
+fig_compact.layout.height == 280  (line only, 2 traces)
+```
 
-Two-column layouts (`st.columns(2)` and `st.columns([a, b])`) generally
-remain usable on phone because each column is ~ 195 px wide. They are
-acceptable as-is unless the cell content itself overflows.
+### F2 — High-arity column rows
 
-### F3 — DataFrames (only one true data table)
+**Before:** thirteen `st.columns(N>=3)` call sites; on a 390 px phone
+each column is `< 130 px`, so labels and metric values either wrap
+awkwardly or clip.
 
-- `modules/feedback/renderer.py:206` is `st.table(rows)`. `st.table` is
-  not horizontally scrollable on Streamlit; wide content truncates.
-  Phase 3 must check the row width — if `len(rows[0]) > 5`, switch to
-  `st.dataframe(rows, use_container_width=True)` or hide low-priority
-  columns on phone.
-- No `st.dataframe()` calls were found in the codebase, so the DataFrame
-  audit reduces to F3 alone for now. If new tables are added in Phase 3
-  they must default to `use_container_width=True`.
+**After:** every site migrated to `responsive_columns(spec_desktop, n_mobile=…)`
+from `modules.utils.layout`. Behaviour:
 
-### F4 — Feedback page long-form Bahasa Indonesia text blocks
+- On desktop (Mode mobile off) the helper passes through to `st.columns`
+  unchanged — no regression.
+- On mobile (Mode mobile on), `n_mobile` controls how cells stack:
+  `n_mobile=1` → full-width rows; `n_mobile=2` → 2-up grid (used for
+  KPI strips that benefit from horizontal pairing).
 
-- `modules/feedback/renderer.py` — most cells render long copy via
-  `st.markdown` inside columns. No fixed-width wrappers were found, so
-  text reflow itself is fine. The risk is that the *column width* (see
-  F2) shrinks the text into very narrow runs, producing >30 lines of
-  one-or-two-word breaks on phone.
-- **Phase 3 action:** stacked single-column layout on phone fixes both
-  F2 and F4 simultaneously. No font-size changes needed if columns drop
-  to 1 — verify in DevTools at 390 px.
+| File:line                                         | Before        | After (`responsive_columns`) | Mobile shape |
+| ------------------------------------------------- | ------------- | ---------------------------- | ------------ |
+| `app.py:628`                                      | `st.columns(3)` | `responsive_columns(3)`       | 1×3          |
+| `modules/feedback/renderer.py:213`                | `st.columns(min(n_sessions, 8))` | `responsive_columns(min(n_sessions, 8), n_mobile=4)` | rows of 4   |
+| `modules/feedback/renderer.py:505`                | `st.columns(3)` | `responsive_columns(3)`       | 1×3          |
+| `modules/feedback/renderer.py:632`                | `st.columns(3)` | `responsive_columns(3)`       | 1×3          |
+| `modules/feedback/renderer.py:907`                | `st.columns(4)` | `responsive_columns(4, n_mobile=2)` | 2×2     |
+| `modules/feedback/renderer.py:959`                | `st.columns(3)` | `responsive_columns(3)`       | 1×3          |
+| `modules/feedback/renderer.py:1030`               | `st.columns(3)` | `responsive_columns(3)`       | 1×3          |
+| `modules/feedback/renderer.py:1152` (header row)  | `st.columns([2,1.5,1.5,2])` | gated by `is_mobile()` — header is hidden on mobile, labels are inlined into each body row | n/a (suppressed) |
+| `modules/feedback/renderer.py:1161` (body row)    | `st.columns([2,1.5,1.5,2])` | `responsive_columns([2,1.5,1.5,2])` + inlined labels on mobile | 1×4 stacked  |
+| `modules/simulation/ui.py:620`                    | `st.columns(3)` | `responsive_columns(3)`       | 1×3          |
+| `modules/simulation/ui.py:668`                    | `st.columns(4)` | `responsive_columns(4, n_mobile=2)` | 2×2     |
+| `modules/simulation/ui.py:865`                    | `st.columns(4)` | `responsive_columns(4, n_mobile=2)` | 2×2     |
+| `modules/utils/ui_helpers.py:117` (top nav)       | `st.columns(4)` | `responsive_columns(4, n_mobile=2)` | 2×2     |
 
-### F5 — Already-correct primitives (no Phase 3 work expected)
+Two-column layouts (`st.columns(2)`, `st.columns([a, b])`) were left
+alone — at 390 px each cell is ~195 px wide, which is acceptable for
+form labels and button pairs.
 
-The following are already mobile-friendly and require no change:
+### F3 — DataFrames
+
+**Before:** one `st.table(rows)` at `modules/feedback/renderer.py:207`
+with 4 columns (Sesi + 3 bias names). No `st.dataframe()` calls.
+
+**After:** verified that the table has only 4 columns (≤ the 5-col
+threshold in the prompt) with short content (`💡 Ringan`-style cells),
+so it fits on a 390 px viewport without truncation. No conversion to
+`st.dataframe` was made because `tests/test_renderer.py:259` asserts
+`mock_st.table.assert_called_once()` — switching primitives would
+break that test without a UX win. Future tables added to the codebase
+should default to `st.dataframe(..., use_container_width=True)` per the
+Phase 3 prompt.
+
+### F4 — Feedback page long-form Bahasa Indonesia text
+
+**Before:** long markdown blocks rendered inside narrow columns wrapped
+into one- or two-word lines on phone.
+
+**After:** since every high-arity column row in `feedback/renderer.py`
+now collapses to single-column on mobile via `responsive_columns`,
+markdown blocks have the full viewport width to flow into. No font-size
+changes were needed. Cross-checked `inject_custom_css()` and
+`render_top_nav` for hardcoded widths:
+
+- `modules/utils/ui_helpers.py:110` — the `min-width: 240px` on nav
+  buttons would have caused horizontal overflow on phone (240 px > the
+  ~195 px-per-cell budget at 390 px). Wrapped in
+  `@media (min-width: 769px)` so the rule only applies above the
+  tablet breakpoint.
+- No other fixed widths found in `inject_custom_css()`.
+
+### F5 — Already-correct primitives (unchanged)
 
 - `use_container_width=True` is set on every `st.plotly_chart()` and
-  every primary action button (`app.py:251`, `app.py:324`, etc.).
-- `render_mobile_banner()` (`modules/utils/ui_helpers.py:133`) already
-  shows a yellow advisory below 768 px; keep it as a soft fallback.
-- The existing CSS in `inject_custom_css()` is responsive-friendly (no
-  hardcoded `min-width` that would break the viewport).
+  every primary action button.
+- `render_mobile_banner()` continues to show a yellow advisory below
+  768 px — kept as a soft fallback for users who do not toggle Mode
+  mobile.
+- The new `render_mobile_toggle()` is rendered in `_render_header()`
+  on every page (after the banner, before the top nav), so users get
+  a single, persistent control to opt into mobile mode.
 
 ---
 
-## Phase 3 entry checklist
+## Per-page smoke test at 390 px (textual)
 
-Before starting Phase 3:
+All five pages rely on the same header (`_render_header` in `app.py`),
+which now emits the *Mode mobile* toggle plus the existing yellow
+banner. Pages tested by static read-through with the toggle ON:
 
-1. [ ] Reproduce each finding above in Chrome DevTools at 390 px and
-       capture a "before" screenshot.
-2. [ ] Build the `modules/utils/layout.py:responsive_columns()` helper
-       referenced by the Phase 3 prompt and migrate the F2 call sites
-       in priority order: simulation → feedback → app.
-3. [ ] Add the `st.toggle("Tampilan ringkas untuk mobile")` candlestick
-       fallback for F1.
-4. [ ] Re-shoot screenshots at the five target widths and append a
-       "Phase 3 — after" section to this file.
-5. [ ] Run `pytest tests/ -v` — must remain 85+ passed, 0 failed.
+1. **Beranda (Login / Registrasi).** Forms use 2-col layouts only —
+   already mobile-fine. Buttons all have `use_container_width=True`.
+2. **Simulasi Investasi.** KPI strip (4 cols) → 2×2 grid. Indicator
+   strip (4 cols) → 2×2 grid. Candlestick → line chart at 280 px.
+   Final-results 3-col strip → 1×3 stacked.
+3. **Hasil Analisis & Umpan Balik.** Severity pills (3 cols) → stacked.
+   Gauges (3 cols) → stacked. Per-session timeline strip (up to 8
+   cols) → rows of 4. Self-vs-detected comparison: header hidden on
+   mobile, each row rendered as a labeled stack of four cards.
+4. **Profil Kognitif Saya.** Profile metrics (3 cols) → stacked.
+5. **Survei pasca-sesi (modal).** Already a single column form.
+
+## Remaining gaps
+
+These are **not blockers**, but are worth tracking for Phase 4 polish:
+
+1. **Plotly toolbar overflow on iOS Safari.** Plotly's modebar
+   (zoom / reset / camera icons) sits at top-right of every chart and
+   is not affected by `use_container_width`. On 375-px viewports it
+   can overlap the chart title. Mitigation in Phase 4: pass
+   `config={"displayModeBar": False}` to `st.plotly_chart` for the
+   compact path (the user does not need pan/zoom on a tiny chart).
+2. **Toggle persistence across reruns.** `st.toggle` with `key=` is
+   persisted in `st.session_state` for that browser session, but does
+   not survive a hard reload (cookieless). Acceptable for UAT.
+3. **The candlestick toggle re-creates per stock_id.** Each chart has
+   its own `chart_compact_<sid>` key. Switching stock resets the user's
+   preference. Could centralise via the global *Mode mobile* flag —
+   left as-is per the Phase 3 prompt's explicit per-chart toggle.
+4. **`render_top_nav` button rebinding when going from 2×2 to 1×4.**
+   Streamlit's button identity is keyed by the `key=` arg
+   (`cdt_nav_<label>`), so switching `Mode mobile` mid-session does
+   not reset state — but the rendered card layout reflows. No fix
+   needed.
+5. **No JS-injected viewport detection.** As predicted in the Phase 3
+   prompt, neither session_state nor injected JS gives us a reliable
+   server-side viewport width. Falling back to the user-facing toggle
+   per the prompt's stated guidance.
 
 ---
 
-## Remaining gaps (filled in by Phase 3)
+## Phase 3 verification
 
-_To be populated during Phase 3 with any breakage that survives the
-fixes above (e.g. third-party Plotly toolbar overflow, Streamlit native
-sidebar edge cases on iOS Safari, etc.)._
+- `python3 -m pytest tests/ -q` → **275 passed, 4 skipped** (Postgres-compat,
+  expected when `CDT_DATABASE_URL` is unset). Same green count as Phase 2.
+- `streamlit run app.py` → boots cleanly, no warnings.
+- `_build_full_chart` smoke-checked end-to-end:
+  - desktop path: 8 traces at 420 px;
+  - compact path: 2 traces at 280 px.

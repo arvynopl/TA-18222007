@@ -106,15 +106,18 @@ def render_top_nav(current: str, enabled_map: dict) -> str:
               display:flex; gap:8px; margin:0 0 18px 0;
               border-bottom:1px solid #E5E7EB; padding-bottom:10px;
           }}
-          .stButton > button.cdt-nav-btn {{
-              min-width: {_NAV_MIN_WIDTH_PX}px;
+          @media (min-width: 769px) {{
+              .stButton > button.cdt-nav-btn {{
+                  min-width: {_NAV_MIN_WIDTH_PX}px;
+              }}
           }}
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-    cols = st.columns(len(NAV_ITEMS))
+    from modules.utils.layout import responsive_columns
+    cols = responsive_columns(len(NAV_ITEMS), n_mobile=2)
     clicked: str | None = None
     for (label, key), col in zip(NAV_ITEMS, cols):
         with col:

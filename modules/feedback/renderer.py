@@ -24,6 +24,7 @@ from modules.feedback.generator import (
     get_longitudinal_summary,
     get_session_feedback,
 )
+from modules.utils.layout import is_mobile, responsive_columns
 from modules.utils.ui_helpers import (
     BIAS_DESCRIPTIONS,
     BIAS_NAMES,
@@ -210,7 +211,7 @@ def render_longitudinal_section(user_id: int) -> None:
     for bias_type in ["disposition_effect", "overconfidence", "loss_aversion"]:
         title = BIAS_NAMES.get(bias_type, bias_type)
         st.markdown(f"**{title}**")
-        cols = st.columns(min(n_sessions, 8))
+        cols = responsive_columns(min(n_sessions, 8), n_mobile=4)
         trend = summary["trend"].get(bias_type, [])
         for i, col in enumerate(cols):
             if i < len(trend):
@@ -502,7 +503,7 @@ def render_interaction_profile(user_id: int, snapshots_data: list[dict]) -> None
     }
     if interaction_scores:
         st.markdown("**Koefisien Korelasi Pearson Antar-Bias:**")
-        cols_corr = st.columns(3)
+        cols_corr = responsive_columns(3)
         for col, (key, (a, b)) in zip(cols_corr, _PAIR_LABELS_ID.items()):
             r = interaction_scores.get(key)
             if r is not None:
@@ -629,7 +630,7 @@ def render_anomaly_detection_profile(user_id: int, session_count: int) -> None:
     n_anomalies = sum(flags)
 
     # Summary metric
-    col_a, col_b, col_c = st.columns(3)
+    col_a, col_b, col_c = responsive_columns(3)
     col_a.metric("Total Sesi Dianalisis", n)
     col_b.metric(
         "Sesi Anomali Terdeteksi",
@@ -904,7 +905,7 @@ def _render_session_results(
         )
         unrealized_pnl = sum(p["unrealized_pnl"] for p in sf.open_positions)
 
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2, c3, c4 = responsive_columns(4, n_mobile=2)
         c1.metric(
             "Realized P&L",
             f"Rp {realized_pnl:+,.0f}",
@@ -956,7 +957,7 @@ def _render_session_results(
     st.markdown(tldr_text)
 
     # --- Bias severity pills ---
-    pill_cols = st.columns(3)
+    pill_cols = responsive_columns(3)
     pill_labels = [
         ("Efek Disposisi", bias_results["dei"][1]),
         ("Keyakinan Berlebih", bias_results["ocs"][1]),
@@ -1027,7 +1028,7 @@ def render_feedback_page(user_id: int, session_id: str) -> None:
     st.divider()
 
     # --- Gauge summary strip ---
-    g1, g2, g3 = st.columns(3)
+    g1, g2, g3 = responsive_columns(3)
     with g1:
         sev = classify_severity(metric_data["ocs"], OCS_SEVERE, OCS_MODERATE, OCS_MILD)
         fig = build_severity_gauge(metric_data["ocs"], 1.0, "Keyakinan Berlebih (OCS)", sev)
@@ -1148,26 +1149,37 @@ def render_stated_vs_revealed(user_id: int) -> None:
         "unable_to_compare": "— Tidak Dapat Dibandingkan",
     }
 
-    # Header row
-    h1, h2, h3, h4 = st.columns([2, 1.5, 1.5, 2])
-    h1.markdown("**Bias**")
-    h2.markdown("**Yang Anda Nyatakan**")
-    h3.markdown("**Yang Terdeteksi**")
-    h4.markdown("**Kesenjangan**")
-    st.markdown("<hr style='margin:4px 0; border-color:#E5E7EB;'>", unsafe_allow_html=True)
+    # Header row (skipped on mobile — labels are inlined into each body row)
+    if not is_mobile():
+        h1, h2, h3, h4 = st.columns([2, 1.5, 1.5, 2])
+        h1.markdown("**Bias**")
+        h2.markdown("**Yang Anda Nyatakan**")
+        h3.markdown("**Yang Terdeteksi**")
+        h4.markdown("**Kesenjangan**")
+        st.markdown("<hr style='margin:4px 0; border-color:#E5E7EB;'>", unsafe_allow_html=True)
 
     narratives: list[str] = []
     for comp in report.comparisons:
-        c1, c2, c3, c4 = st.columns([2, 1.5, 1.5, 2])
+        c1, c2, c3, c4 = responsive_columns([2, 1.5, 1.5, 2])
         color = _DISC_COLOR.get(comp.discrepancy, "#78909c")
         disc_label = _DISC_LABEL.get(comp.discrepancy, comp.discrepancy)
-        c1.markdown(f"**{comp.bias_name}**")
-        c2.markdown(_LEVEL_ID.get(comp.stated_level, comp.stated_level))
-        c3.markdown(_LEVEL_ID.get(comp.revealed_level, comp.revealed_level))
-        c4.markdown(
-            f"<span style='color:{color}; font-weight:600;'>{disc_label}</span>",
-            unsafe_allow_html=True,
-        )
+        if is_mobile():
+            c1.markdown(f"**Bias:** {comp.bias_name}")
+            c2.markdown(f"**Yang Anda Nyatakan:** {_LEVEL_ID.get(comp.stated_level, comp.stated_level)}")
+            c3.markdown(f"**Yang Terdeteksi:** {_LEVEL_ID.get(comp.revealed_level, comp.revealed_level)}")
+            c4.markdown(
+                f"**Kesenjangan:** <span style='color:{color}; font-weight:600;'>{disc_label}</span>",
+                unsafe_allow_html=True,
+            )
+            c4.markdown("<hr style='margin:4px 0; border-color:#E5E7EB;'>", unsafe_allow_html=True)
+        else:
+            c1.markdown(f"**{comp.bias_name}**")
+            c2.markdown(_LEVEL_ID.get(comp.stated_level, comp.stated_level))
+            c3.markdown(_LEVEL_ID.get(comp.revealed_level, comp.revealed_level))
+            c4.markdown(
+                f"<span style='color:{color}; font-weight:600;'>{disc_label}</span>",
+                unsafe_allow_html=True,
+            )
         if comp.interpretation_id:
             narratives.append(comp.interpretation_id)
 
