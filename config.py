@@ -91,7 +91,7 @@ AUTH_PASSWORD_MIN_LEN: int = 8
 # Researcher view — password gate via env var. None = view disabled.
 # Enables the hidden ``?view=researcher`` URL for cohort-level UAT inspection.
 # ---------------------------------------------------------------------------
-RESEARCHER_PASSWORD: str | None = os.environ.get("CDT_RESEARCHER_PASSWORD") or None
+RESEARCHER_PASSWORD = os.environ.get("CDT_RESEARCHER_PASSWORD") or None
 
 # ---------------------------------------------------------------------------
 # Stock catalog
