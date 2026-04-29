@@ -69,3 +69,30 @@ def test_non_neon_host_skips_validation():
     url = "postgresql://u:p@db.example.com/db"
     out = _normalize_db_url(url)
     assert urlparse(out).hostname == "db.example.com"
+
+
+def test_markdown_link_wrapped_host_is_unwrapped():
+    """Hostnames pasted as ``[host](http://host)`` should be unwrapped before parsing."""
+    url = (
+        "postgresql://u:p@"
+        "[ep-empty-night-amwbiyl1.ap-southeast-1.aws.neon.tech]"
+        "(http://ep-empty-night-amwbiyl1.ap-southeast-1.aws.neon.tech)"
+        "/db?sslmode=require"
+    )
+    out = _normalize_db_url(url)
+    assert "[" not in out and "]" not in out
+    assert urlparse(out).hostname == (
+        "ep-empty-night-amwbiyl1.ap-southeast-1.aws.neon.tech"
+    )
+
+
+def test_markdown_link_wrapped_host_without_region_still_raises():
+    """After unwrapping, the existing region check must still fire."""
+    url = (
+        "postgresql://u:p@"
+        "[ep-empty-night-amwbiyl1.neon.tech]"
+        "(http://ep-empty-night-amwbiyl1.neon.tech)"
+        "/db?sslmode=require"
+    )
+    with pytest.raises(ValueError, match="missing the region segment"):
+        _normalize_db_url(url)

@@ -23,6 +23,7 @@ in requirements.txt.
 
 from __future__ import annotations
 
+import re
 from contextlib import contextmanager
 from typing import Generator, Optional
 from urllib.parse import urlparse
@@ -65,18 +66,35 @@ def _validate_neon_host(url: str) -> None:
         )
 
 
+_MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\((?:https?://)?[^)\s]+\)")
+
+
+def _strip_markdown_links(url: str) -> str:
+    """Replace any ``[label](target)`` fragments with just ``label``.
+
+    Tools like Slack, Notion, and some markdown editors auto-format hostnames
+    as links; pasting the result into ``CDT_DATABASE_URL`` produces a string
+    such as ``postgresql://u:p@[host.neon.tech](http://host.neon.tech)/db``,
+    which psycopg2 then rejects with a cryptic DNS error. Unwrapping the
+    label lets downstream parsing and Neon-host validation work as intended.
+    """
+    return _MARKDOWN_LINK_RE.sub(r"\1", url)
+
+
 def _normalize_db_url(url: str) -> str:
     """Normalise a database URL for SQLAlchemy 2.x.
 
     - Strips surrounding whitespace (a frequent copy-paste artefact in
       ``.streamlit/secrets.toml`` and shell exports).
+    - Unwraps markdown-link syntax (``[host](http://host)``) that some tools
+      insert when a hostname is pasted from a rich-text source.
     - ``postgres://...`` (Neon, Heroku-style) → ``postgresql://...``
     - ``postgresql://...`` (no driver) → ``postgresql+psycopg2://...``
     - Validates Neon hostnames so a missing region segment fails fast with a
       helpful error rather than a cryptic DNS failure inside psycopg2.
     - All other schemes (sqlite, postgresql+psycopg2, etc.) returned unchanged.
     """
-    url = url.strip()
+    url = _strip_markdown_links(url.strip())
     if url.startswith("postgres://"):
         url = "postgresql://" + url[len("postgres://"):]
     if url.startswith("postgresql://"):
