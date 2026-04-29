@@ -1054,6 +1054,17 @@ def main() -> None:
     _init_session_state()
     inject_custom_css()
 
+    # Hidden researcher view — URL-only, password-gated. Rendered before the
+    # standard header so UAT participants never see it through normal nav.
+    raw_view = st.query_params.get("view", None)
+    view_token = raw_view if isinstance(raw_view, str) else (
+        raw_view[0] if raw_view else None
+    )
+    if view_token == "researcher":
+        from pages.researcher import render_researcher_page
+        render_researcher_page()
+        return
+
     if _maybe_render_admin():
         return
 
