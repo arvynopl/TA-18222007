@@ -1,0 +1,193 @@
+2026-04-03 13:01:07 [modules.utils.log_config] INFO: Logging initialised — level=INFO file=/Users/arvyno.limahardja/Downloads/TA/TA-18222007/app.log
+2026-04-03 13:01:25 [modules.utils.log_config] INFO: Logging initialised — level=INFO file=/Users/arvyno.limahardja/Downloads/TA/TA-18222007/app.log
+2026-04-03 13:01:25 [database.seed] INFO: Seed complete — 0 stocks, 0 snapshots inserted.
+2026-04-03 13:01:44 [__main__] INFO: New user created: alias='ARVYNO'
+2026-04-03 21:03:33 [modules.utils.log_config] INFO: Logging initialised — level=INFO file=/Users/arvyno.limahardja/Downloads/TA/TA-18222007/app.log
+2026-04-03 21:03:33 [database.seed] INFO: Seed complete — 6 stocks, 0 snapshots inserted.
+2026-04-03 21:04:07 [__main__] INFO: New user created: alias='Arvyno Pranata'
+2026-04-03 22:02:18 [database.seed] INFO: Seed complete — 0 stocks, 0 snapshots inserted.
+2026-04-03 22:02:35 [__main__] INFO: New user created: alias='Arvyno Limahardja'
+2026-04-05 00:27:07 [modules.utils.log_config] INFO: Logging initialised — level=INFO file=/Users/arvyno.limahardja/Downloads/TA/TA-18222007/app.log
+2026-04-05 00:42:30 [modules.utils.log_config] INFO: Logging initialised — level=INFO file=/Users/arvyno.limahardja/Downloads/TA/TA-18222007/app.log
+2026-04-05 00:42:30 [database.seed] INFO: Seed complete — 0 stocks, 2820 snapshots inserted.
+2026-04-05 00:42:38 [__main__] INFO: Existing user login: alias='ARVYNO' id=2
+2026-04-05 00:51:21 [modules.utils.log_config] INFO: Logging initialised — level=INFO file=/Users/arvyno.limahardja/Downloads/TA/TA-18222007/app.log
+2026-04-05 00:51:21 [modules.utils.log_config] INFO: Logging initialised — level=INFO file=/Users/arvyno.limahardja/Downloads/TA/TA-18222007/app.log
+2026-04-05 00:51:21 [database.seed] INFO: Seed complete — 0 stocks, 0 snapshots inserted.
+2026-04-05 00:51:21 [database.seed] INFO: Seed complete — 0 stocks, 0 snapshots inserted.
+2026-04-05 00:51:27 [__main__] INFO: Existing user login: alias='ARVYNO' id=2
+2026-04-05 00:51:27 [__main__] INFO: Existing user login: alias='ARVYNO' id=2
+2026-04-05 15:02:01 [modules.utils.log_config] INFO: Logging initialised — level=INFO file=/Users/arvyno.limahardja/Downloads/TA/TA-18222007/app.log
+2026-04-05 15:02:02 [database.seed] INFO: Seed complete — 0 stocks, 0 snapshots inserted.
+2026-04-05 15:03:18 [__main__] INFO: Existing user login: alias='Arvyno' id=1
+2026-04-05 15:47:14 [modules.utils.log_config] INFO: Logging initialised — level=INFO file=/Users/arvyno.limahardja/Downloads/TA/TA-18222007/app.log
+2026-04-05 15:47:15 [database.seed] INFO: Seed complete — 0 stocks, 0 snapshots inserted.
+2026-04-05 15:47:24 [__main__] INFO: Existing user login: alias='Arvyno' id=1
+2026-04-05 15:47:56 [database.seed] INFO: Seed complete — 0 stocks, 0 snapshots inserted.
+2026-04-05 15:48:01 [__main__] INFO: New user created: alias='Test'
+2026-04-05 15:56:00 [modules.utils.log_config] INFO: Logging initialised — level=INFO file=/Users/arvyno.limahardja/Downloads/TA/TA-18222007/app.log
+2026-04-05 15:56:00 [database.seed] INFO: Seed complete — 0 stocks, 0 snapshots inserted.
+2026-04-05 15:56:09 [__main__] INFO: Existing user login: alias='Arvyno' id=1
+2026-04-05 16:37:59 [modules.utils.log_config] INFO: Logging initialised — level=INFO file=/Users/arvyno.limahardja/Downloads/TA/TA-18222007/app.log
+2026-04-05 16:38:00 [database.seed] INFO: Seed complete — 0 stocks, 0 snapshots inserted.
+2026-04-05 16:38:05 [__main__] INFO: Existing user login: alias='Arvyno' id=1
+2026-04-05 16:39:16 [modules.utils.log_config] INFO: Logging initialised — level=INFO file=/Users/arvyno.limahardja/Downloads/TA/TA-18222007/app.log
+2026-04-05 16:39:16 [database.seed] INFO: Seed complete — 0 stocks, 0 snapshots inserted.
+2026-04-05 16:39:35 [__main__] INFO: Existing user login: alias='Arvyno' id=1
+2026-04-07 10:23:41 [modules.utils.log_config] INFO: Logging initialised — level=INFO file=/Users/arvyno.limahardja/Downloads/TA/TA-18222007/app.log
+2026-04-07 10:23:41 [database.seed] INFO: Seed complete — 0 stocks, 0 snapshots inserted.
+2026-04-07 12:35:43 [modules.utils.log_config] INFO: Logging initialised — level=INFO file=/Users/arvyno.limahardja/Downloads/TA/TA-18222007/app.log
+2026-04-07 12:35:43 [database.seed] INFO: Seed complete — 0 stocks, 0 snapshots inserted.
+2026-04-07 12:35:53 [__main__] INFO: Existing user login: alias='Test' id=5
+2026-04-08 07:27:00 [__main__] INFO: Existing user login: alias='Arvyno' id=1
+2026-04-08 12:28:55 [modules.utils.log_config] INFO: Logging initialised — level=INFO file=/Users/arvyno.limahardja/Downloads/TA/TA-18222007/app.log
+2026-04-08 12:28:55 [database.seed] INFO: Seed complete — 0 stocks, 0 snapshots inserted.
+2026-04-08 12:29:08 [__main__] INFO: Existing user login: alias='Arvyno' id=1
+2026-04-08 13:22:50 [modules.utils.log_config] INFO: Logging initialised — level=INFO file=/Users/arvyno.limahardja/Downloads/TA/TA-18222007/app.log
+2026-04-08 13:22:50 [database.seed] INFO: Seed complete — 0 stocks, 0 snapshots inserted.
+2026-04-08 13:22:59 [__main__] INFO: Existing user login: alias='Arvyno' id=1
+2026-04-08 13:24:10 [__main__] INFO: Existing user login: alias='Arvyno' id=1
+2026-04-09 14:11:59 [modules.utils.log_config] INFO: Logging initialised — level=INFO file=/Users/arvyno.limahardja/Downloads/TA/TA-18222007/app.log
+2026-04-09 14:12:00 [database.seed] INFO: Seed complete — 0 stocks, 0 snapshots inserted.
+2026-04-09 14:12:58 [__main__] INFO: New user created: alias='User'
+2026-04-09 14:13:34 [__main__] INFO: Existing user login: alias='Arvyno' id=1
+2026-04-09 14:13:47 [__main__] INFO: Existing user login: alias='Arvyno' id=1
+2026-04-12 21:29:51 [modules.utils.log_config] INFO: Logging initialised — level=INFO file=/Users/arvyno.limahardja/Downloads/TA/TA-18222007/app.log
+2026-04-12 21:29:51 [database.seed] INFO: Seed complete — 0 stocks, 0 snapshots inserted.
+2026-04-12 21:30:10 [__main__] INFO: Existing user login: alias='Arvyno' id=1
+2026-04-12 21:31:32 [modules.utils.log_config] INFO: Logging initialised — level=INFO file=/Users/arvyno.limahardja/Downloads/TA/TA-18222007/app.log
+2026-04-12 21:31:32 [database.seed] INFO: Seed complete — 0 stocks, 0 snapshots inserted.
+2026-04-12 21:32:48 [__main__] INFO: Existing user login: alias='Arvyno' id=1
+2026-04-12 22:31:19 [modules.utils.log_config] INFO: Logging initialised — level=INFO file=/Users/arvyno.limahardja/Downloads/TA/TA-18222007/app.log
+2026-04-12 22:31:19 [database.seed] INFO: Seed complete — 0 stocks, 0 snapshots inserted.
+2026-04-12 22:32:02 [__main__] INFO: Existing user login: alias='Arvyno' id=1
+2026-04-12 22:37:56 [modules.utils.log_config] INFO: Logging initialised — level=INFO file=/Users/arvyno.limahardja/Downloads/TA/TA-18222007/app.log
+2026-04-12 22:37:57 [database.seed] INFO: Seed complete — 0 stocks, 0 snapshots inserted.
+2026-04-12 22:38:06 [__main__] INFO: Existing user login: alias='Arvyno' id=1
+2026-04-12 22:40:32 [__main__] INFO: Existing user login: alias='Arvyno' id=1
+2026-04-14 17:43:20 [modules.utils.log_config] INFO: Logging initialised — level=INFO file=/Users/arvyno.limahardja/Downloads/TA/TA-18222007/app.log
+2026-04-14 17:43:20 [database.seed] INFO: Seed complete — 0 stocks, 0 snapshots inserted.
+2026-04-14 17:43:34 [__main__] INFO: Existing user login: alias='Arvyno' id=1
+2026-04-21 23:43:28 [modules.utils.log_config] INFO: Logging initialised — level=INFO file=/Users/arvyno.limahardja/Downloads/TA/TA-18222007/app.log
+2026-04-21 23:43:28 [database.seed] INFO: Seed complete — 0 stocks, 0 snapshots inserted.
+2026-04-21 23:43:40 [__main__] INFO: Existing user login: alias='Arvyno' id=1
+2026-04-21 23:44:41 [modules.simulation.ui] ERROR: user=1 session=28768e52-c67a-44a6-961f-6afc1104b02b post-session pipeline failed; marking session as error
+Traceback (most recent call last):
+  File "/Users/arvyno.limahardja/Downloads/TA/.venv/lib/python3.9/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+  File "/Users/arvyno.limahardja/Downloads/TA/.venv/lib/python3.9/site-packages/sqlalchemy/engine/default.py", line 952, in do_execute
+    cursor.execute(statement, parameters)
+sqlite3.OperationalError: table bias_metrics has no column named dei_ci_lower
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/Users/arvyno.limahardja/Downloads/TA/TA-18222007/modules/simulation/ui.py", line 351, in _run_post_session_pipeline
+    bias_metric = compute_and_save_metrics(sess, user_id, session_id)
+  File "/Users/arvyno.limahardja/Downloads/TA/TA-18222007/modules/analytics/bias_metrics.py", line 505, in compute_and_save_metrics
+    db_session.flush()
+  File "/Users/arvyno.limahardja/Downloads/TA/.venv/lib/python3.9/site-packages/sqlalchemy/orm/session.py", line 4331, in flush
+    self._flush(objects)
+  File "/Users/arvyno.limahardja/Downloads/TA/.venv/lib/python3.9/site-packages/sqlalchemy/orm/session.py", line 4467, in _flush
+    transaction.rollback(_capture_exception=True)
+  File "/Users/arvyno.limahardja/Downloads/TA/.venv/lib/python3.9/site-packages/sqlalchemy/util/langhelpers.py", line 121, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "/Users/arvyno.limahardja/Downloads/TA/.venv/lib/python3.9/site-packages/sqlalchemy/orm/session.py", line 4427, in _flush
+    flush_context.execute()
+  File "/Users/arvyno.limahardja/Downloads/TA/.venv/lib/python3.9/site-packages/sqlalchemy/orm/unitofwork.py", line 466, in execute
+    rec.execute(self)
+  File "/Users/arvyno.limahardja/Downloads/TA/.venv/lib/python3.9/site-packages/sqlalchemy/orm/unitofwork.py", line 642, in execute
+    util.preloaded.orm_persistence.save_obj(
+  File "/Users/arvyno.limahardja/Downloads/TA/.venv/lib/python3.9/site-packages/sqlalchemy/orm/persistence.py", line 93, in save_obj
+    _emit_insert_statements(
+  File "/Users/arvyno.limahardja/Downloads/TA/.venv/lib/python3.9/site-packages/sqlalchemy/orm/persistence.py", line 1233, in _emit_insert_statements
+    result = connection.execute(
+  File "/Users/arvyno.limahardja/Downloads/TA/.venv/lib/python3.9/site-packages/sqlalchemy/engine/base.py", line 1419, in execute
+    return meth(
+  File "/Users/arvyno.limahardja/Downloads/TA/.venv/lib/python3.9/site-packages/sqlalchemy/sql/elements.py", line 527, in _execute_on_connection
+    return connection._execute_clauseelement(
+  File "/Users/arvyno.limahardja/Downloads/TA/.venv/lib/python3.9/site-packages/sqlalchemy/engine/base.py", line 1641, in _execute_clauseelement
+    ret = self._execute_context(
+  File "/Users/arvyno.limahardja/Downloads/TA/.venv/lib/python3.9/site-packages/sqlalchemy/engine/base.py", line 1846, in _execute_context
+    return self._exec_single_context(
+  File "/Users/arvyno.limahardja/Downloads/TA/.venv/lib/python3.9/site-packages/sqlalchemy/engine/base.py", line 1986, in _exec_single_context
+    self._handle_dbapi_exception(
+  File "/Users/arvyno.limahardja/Downloads/TA/.venv/lib/python3.9/site-packages/sqlalchemy/engine/base.py", line 2363, in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "/Users/arvyno.limahardja/Downloads/TA/.venv/lib/python3.9/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+  File "/Users/arvyno.limahardja/Downloads/TA/.venv/lib/python3.9/site-packages/sqlalchemy/engine/default.py", line 952, in do_execute
+    cursor.execute(statement, parameters)
+sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) table bias_metrics has no column named dei_ci_lower
+[SQL: INSERT INTO bias_metrics (user_id, session_id, overconfidence_score, disposition_pgr, disposition_plr, disposition_dei, loss_aversion_index, dei_ci_lower, dei_ci_upper, ocs_ci_lower, ocs_ci_upper, lai_ci_lower, lai_ci_upper, ci_low_confidence, computed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)]
+[parameters: (1, '28768e52-c67a-44a6-961f-6afc1104b02b', 0.03695254816240956, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.03695254816240956, 0.03695254816240956, 0.0, 0.0, 1, '2026-04-21 16:44:41.884675')]
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2026-04-21 23:52:59 [modules.utils.log_config] INFO: Logging initialised — level=INFO file=/Users/arvyno.limahardja/Downloads/TA/TA-18222007/app.log
+2026-04-21 23:53:00 [database.seed] INFO: Seed complete — 0 stocks, 0 snapshots inserted.
+2026-04-21 23:53:11 [__main__] INFO: Existing user login: alias='Arvyno' id=1
+2026-04-21 23:53:12 [modules.cdt.ml_validator] WARNING: scikit-learn not installed — ML anomaly detection unavailable.
+2026-04-21 23:53:17 [modules.cdt.ml_validator] WARNING: scikit-learn not installed — ML anomaly detection unavailable.
+2026-04-21 23:55:15 [modules.cdt.ml_validator] WARNING: scikit-learn not installed — ML anomaly detection unavailable.
+2026-04-24 00:18:27 [modules.utils.log_config] INFO: Logging initialised — level=INFO file=/Users/arvyno.limahardja/Downloads/TA/TA-18222007/app.log
+2026-04-24 00:18:27 [database.seed] INFO: Seed complete — 0 stocks, 0 snapshots inserted.
+2026-04-24 00:21:14 [__main__] INFO: Existing user login: alias='Arvyno' id=1
+2026-04-24 00:26:26 [modules.cdt.ml_validator] WARNING: scikit-learn not installed — ML anomaly detection unavailable.
+2026-04-24 00:50:55 [modules.cdt.ml_validator] WARNING: scikit-learn not installed — ML anomaly detection unavailable.
+2026-04-24 09:01:50 [modules.utils.log_config] INFO: Logging initialised — level=INFO file=/Users/arvyno.limahardja/Downloads/TA/TA-18222007/app.log
+2026-04-24 09:01:51 [database.seed] INFO: Seed complete — 0 stocks, 0 snapshots inserted.
+2026-04-24 09:02:04 [__main__] INFO: Existing user login: alias='Arvyno' id=1
+2026-04-24 09:36:16 [__main__] INFO: Existing user login: alias='Arvyno' id=1
+2026-04-24 09:45:56 [__main__] INFO: Existing user login: alias='Arvyno' id=1
+2026-04-24 09:56:19 [__main__] INFO: Existing user login: alias='Arvyno' id=1
+2026-04-24 10:48:37 [__main__] INFO: New user created: alias='Test 2'
+2026-04-24 10:48:53 [modules.cdt.profile] INFO: Initialising profile for user 7 with zero priors (no survey)
+2026-04-24 10:55:41 [__main__] INFO: Existing user login: alias='Arvyno' id=1
+2026-04-25 16:16:54 [modules.utils.log_config] INFO: Logging initialised — level=INFO file=/Users/arvyno.limahardja/Downloads/TA/TA-18222007/app.log
+2026-04-25 16:16:54 [database.seed] INFO: Seed complete — 0 stocks, 0 snapshots inserted.
+2026-04-25 16:18:54 [modules.auth.service] INFO: Registered new user username='test1' id=8
+2026-04-25 19:26:26 [modules.utils.log_config] INFO: Logging initialised — level=INFO file=/Users/arvyno.limahardja/Downloads/TA/TA-18222007/app.log
+2026-04-25 19:26:37 [database.seed] INFO: Seed complete — 0 stocks, 0 snapshots inserted.
+2026-04-25 19:26:51 [modules.auth.service] INFO: Authenticated user username='test1' id=8
+2026-04-25 19:27:39 [modules.auth.service] INFO: Authenticated user username='test1' id=8
+2026-04-25 19:39:54 [modules.cdt.profile] INFO: Initialising profile for user 8 with survey priors {'overconfidence': 0.075, 'disposition': 0.11249999999999999, 'loss_aversion': 0.0375}
+2026-04-26 15:32:32 [modules.utils.log_config] INFO: Logging initialised — level=INFO file=/Users/arvyno.limahardja/Downloads/TA/TA-18222007/app.log
+2026-04-26 15:32:32 [database.seed] INFO: Seed complete — 0 stocks, 0 snapshots inserted.
+2026-04-26 15:32:53 [modules.auth.service] INFO: Authenticated user username='test1' id=8
+2026-04-26 15:33:01 [modules.cdt.ml_validator] WARNING: scikit-learn not installed — ML anomaly detection unavailable.
+2026-04-26 15:33:33 [modules.cdt.ml_validator] WARNING: scikit-learn not installed — ML anomaly detection unavailable.
+2026-04-26 15:35:22 [modules.cdt.ml_validator] WARNING: scikit-learn not installed — ML anomaly detection unavailable.
+2026-04-26 15:37:34 [modules.cdt.ml_validator] WARNING: scikit-learn not installed — ML anomaly detection unavailable.
+2026-04-26 15:40:40 [modules.cdt.ml_validator] WARNING: scikit-learn not installed — ML anomaly detection unavailable.
+2026-04-26 15:40:58 [modules.cdt.ml_validator] WARNING: scikit-learn not installed — ML anomaly detection unavailable.
+2026-04-26 16:32:26 [modules.cdt.ml_validator] WARNING: scikit-learn not installed — ML anomaly detection unavailable.
+2026-04-26 16:33:01 [modules.cdt.ml_validator] WARNING: scikit-learn not installed — ML anomaly detection unavailable.
+2026-04-26 16:33:20 [modules.cdt.ml_validator] WARNING: scikit-learn not installed — ML anomaly detection unavailable.
+2026-04-26 16:34:27 [modules.cdt.ml_validator] WARNING: scikit-learn not installed — ML anomaly detection unavailable.
+2026-04-26 16:34:27 [modules.cdt.ml_validator] WARNING: scikit-learn not installed — ML anomaly detection unavailable.
+2026-04-26 16:34:39 [modules.cdt.ml_validator] WARNING: scikit-learn not installed — ML anomaly detection unavailable.
+2026-04-26 16:34:40 [modules.cdt.ml_validator] WARNING: scikit-learn not installed — ML anomaly detection unavailable.
+2026-04-26 22:57:53 [modules.utils.log_config] INFO: Logging initialised — level=INFO file=/Users/arvyno.limahardja/Downloads/TA/TA-18222007/app.log
+2026-04-26 22:57:53 [database.seed] INFO: Seed complete — 0 stocks, 0 snapshots inserted.
+2026-04-26 22:58:55 [modules.auth.service] INFO: Authenticated user username='test1' id=8
+2026-04-26 22:59:05 [modules.cdt.ml_validator] WARNING: scikit-learn not installed — ML anomaly detection unavailable.
+2026-04-26 22:59:07 [modules.cdt.ml_validator] WARNING: scikit-learn not installed — ML anomaly detection unavailable.
+2026-04-26 22:59:09 [modules.cdt.ml_validator] WARNING: scikit-learn not installed — ML anomaly detection unavailable.
+2026-04-26 22:59:11 [modules.cdt.ml_validator] WARNING: scikit-learn not installed — ML anomaly detection unavailable.
+2026-04-26 22:59:23 [modules.cdt.ml_validator] WARNING: scikit-learn not installed — ML anomaly detection unavailable.
+2026-04-26 22:59:46 [modules.cdt.ml_validator] WARNING: scikit-learn not installed — ML anomaly detection unavailable.
+2026-04-26 23:01:34 [modules.cdt.ml_validator] WARNING: scikit-learn not installed — ML anomaly detection unavailable.
+2026-04-26 23:03:09 [modules.cdt.ml_validator] WARNING: scikit-learn not installed — ML anomaly detection unavailable.
+2026-04-26 23:03:15 [modules.cdt.ml_validator] WARNING: scikit-learn not installed — ML anomaly detection unavailable.
+2026-04-26 23:03:44 [modules.cdt.ml_validator] WARNING: scikit-learn not installed — ML anomaly detection unavailable.
+2026-04-26 23:39:01 [modules.utils.log_config] INFO: Logging initialised — level=INFO file=/Users/arvyno.limahardja/Downloads/TA/TA-18222007/app.log
+2026-04-26 23:39:02 [database.seed] INFO: Seed complete — 0 stocks, 0 snapshots inserted.
+2026-04-26 23:39:19 [modules.auth.service] INFO: Authenticated user username='test1' id=8
+2026-04-27 00:11:19 [modules.utils.log_config] INFO: Logging initialised — level=INFO file=/Users/arvyno.limahardja/Downloads/TA/TA-18222007/app.log
+2026-04-27 00:11:19 [database.seed] INFO: Seed complete — 0 stocks, 0 snapshots inserted.
+2026-04-27 00:11:43 [modules.auth.service] INFO: Authenticated user username='test1' id=8
+2026-04-27 00:27:19 [modules.utils.log_config] INFO: Logging initialised — level=INFO file=/Users/arvyno.limahardja/Downloads/TA/TA-18222007/app.log
+2026-04-27 00:27:19 [database.seed] INFO: Seed complete — 0 stocks, 0 snapshots inserted.
+2026-04-27 00:27:57 [modules.auth.service] INFO: Authenticated user username='test1' id=8
+2026-04-27 00:55:22 [modules.utils.log_config] INFO: Logging initialised — level=INFO file=/Users/arvyno.limahardja/Downloads/TA/TA-18222007/app.log
+2026-04-27 00:55:23 [database.seed] INFO: Seed complete — 0 stocks, 0 snapshots inserted.
+2026-04-27 00:56:19 [modules.auth.service] INFO: Authenticated user username='test1' id=8
