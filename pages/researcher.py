@@ -28,6 +28,7 @@ import streamlit as st
 
 import config
 from database.connection import get_session
+from modules.utils.layout import responsive_columns
 from modules.utils.research_export import (
     export_all_sessions_csv,
     export_all_users_csv,
@@ -37,6 +38,7 @@ from modules.utils.research_export import (
 )
 from modules.utils.ui_helpers import (
     SEVERITY_COLORS, apply_chart_theme, fmt_datetime_wib,
+    inject_custom_css, render_mobile_banner,
 )
 
 logger = logging.getLogger(__name__)
@@ -120,7 +122,17 @@ def _section_summary(summary: dict) -> None:
         "nilai mutlak (|DEI|) untuk merefleksikan kekuatan bias terlepas dari arah."
     )
 
-    row1 = st.columns(4)
+    excluded = summary.get("excluded_non_participants", 0)
+    if excluded:
+        st.info(
+            f"Disaring otomatis: **{excluded} pengguna non-partisipan** (mis. "
+            "akun admin/peneliti, residu uji legacy) dikecualikan agar "
+            "statistik kohort tidak terdistorsi. Filter berbasis konsen / "
+            "profil registrasi / kredensial autentikasi.",
+            icon="🛡️",
+        )
+
+    row1 = responsive_columns(4, n_mobile=2)
     row1[0].metric("Total Pengguna", summary["total_users"])
     row1[1].metric("Total Sesi", summary["total_sessions"])
     row1[2].metric("Pengguna ≥3 Sesi", summary["users_with_min_3_sessions"])
@@ -130,7 +142,7 @@ def _section_summary(summary: dict) -> None:
         help="Proporsi pengguna yang menyelesaikan minimal 3 sesi.",
     )
 
-    row2 = st.columns(4)
+    row2 = responsive_columns(4, n_mobile=2)
     row2[0].metric("Rata-rata DEI", f"{summary['mean_dei']:.3f}")
     row2[1].metric("Rata-rata OCS", f"{summary['mean_ocs']:.3f}")
     row2[2].metric("Rata-rata LAI", f"{summary['mean_lai']:.3f}")
@@ -146,6 +158,7 @@ def _section_summary(summary: dict) -> None:
             "sd_dei": summary["sd_dei"],
             "sd_ocs": summary["sd_ocs"],
             "sd_lai": summary["sd_lai"],
+            "excluded_non_participants": excluded,
         })
 
 
@@ -206,7 +219,7 @@ def _section_distributions(sessions_rows: list[dict]) -> None:
     ocs_vals = [r["ocs"] for r in sessions_rows if r["ocs"] is not None]
     lai_vals = [r["lai"] for r in sessions_rows if r["lai"] is not None]
 
-    cols = st.columns(3)
+    cols = responsive_columns(3, n_mobile=1)
     for col, title, values, thresholds in (
         (cols[0], "DEI (|DEI|)", dei_vals,
          (config.DEI_MILD, config.DEI_MODERATE, config.DEI_SEVERE)),
@@ -309,7 +322,7 @@ def _section_survey_vs_observed(users_rows: list[dict]) -> None:
          "cdt_loss_aversion"),
     ]
 
-    cols = st.columns(3)
+    cols = responsive_columns(3, n_mobile=1)
     for col, (label, q_keys, observed_key) in zip(cols, bias_specs):
         xs: list[float] = []
         ys: list[float] = []
@@ -373,7 +386,7 @@ def _section_model_performance() -> None:
             except ValueError:
                 weighted_f1 = None
 
-    cols = st.columns(4)
+    cols = responsive_columns(4, n_mobile=2)
     cols[0].metric(
         "Akurasi", f"{accuracy:.3f}" if accuracy is not None else "—",
     )
@@ -396,7 +409,7 @@ def _section_model_performance() -> None:
             hide_index=True,
         )
 
-    img_cols = st.columns(2)
+    img_cols = responsive_columns(2, n_mobile=1)
     with img_cols[0]:
         if perf["feature_importance_path"]:
             st.markdown("**Pentingnya Fitur (Feature Importance)**")
@@ -424,7 +437,7 @@ def _section_bulk_export(
     st.caption(
         "Unduh keseluruhan data UAT untuk analisis statistik di luar aplikasi."
     )
-    cols = st.columns(3)
+    cols = responsive_columns(3, n_mobile=1)
     with cols[0]:
         st.download_button(
             label="Semua Pengguna (CSV)",
@@ -462,19 +475,24 @@ def _section_bulk_export(
 # ---------------------------------------------------------------------------
 def render_researcher_page() -> None:
     """Render the full researcher view (after auth)."""
+    inject_custom_css()
     if not _ensure_authenticated():
         return
 
+    render_mobile_banner()
     st.title("Mode Peneliti — Inspeksi UAT")
     st.caption(
         f"Akses berhasil. Waktu server: {fmt_datetime_wib(__import__('datetime').datetime.now(__import__('datetime').timezone.utc))}."
     )
 
+    # All exports filtered to qualified participants so admin/legacy/test
+    # residuals (e.g. seeded `pgjson_*` rows or the researcher_admin shell)
+    # don't pollute cohort statistics or per-user tables.
     with get_session() as sess:
-        summary = get_cohort_summary(sess)
-        users_rows = export_all_users_csv(sess)
-        sessions_rows = export_all_sessions_csv(sess)
-        snapshots_rows = export_cdt_snapshots_csv(sess)
+        summary = get_cohort_summary(sess, participants_only=True)
+        users_rows = export_all_users_csv(sess, participants_only=True)
+        sessions_rows = export_all_sessions_csv(sess, participants_only=True)
+        snapshots_rows = export_cdt_snapshots_csv(sess, participants_only=True)
 
     tabs = st.tabs([
         "Ringkasan",

@@ -146,7 +146,12 @@ def _render_header() -> None:
 
     current = st.session_state["current_page"]
 
-    title_col, user_col = st.columns([5, 1])
+    # Title block + identity cluster. On desktop the two share a row [5, 1];
+    # on mobile they stack vertically (n_mobile=1) so neither is squeezed —
+    # the [5, 1] split would otherwise leave the logout cell at ~63 px on a
+    # 380 px viewport, below the 44 px tap-target threshold once gutters and
+    # the username label are accounted for.
+    title_col, user_col = responsive_columns([5, 1], n_mobile=1)
     with title_col:
         st.markdown("### Kenali Pola Investasi Anda")
         st.caption(
@@ -156,21 +161,18 @@ def _render_header() -> None:
     with user_col:
         if st.session_state.get("user_alias"):
             alias = st.session_state["user_alias"]
-            # Identity cluster: logout button and username on the same horizontal level.
-            # CSS flex row — button on the left, username label on the right.
-            # The button is rendered via st.button (interactive); the username
-            # label sits alongside it via a negative-margin markdown trick.
-            btn_col, name_col = st.columns([1, 1])
-            with btn_col:
-                if st.button("Keluar", key="cdt_logout"):
-                    _logout()
-                    st.rerun()
-            with name_col:
-                st.markdown(
-                    f"<div style='padding-top:8px; font-size:13px; color:#5F6368;'>"
-                    f"Pengguna: <b style='color:#1C1E21;'>{alias}</b></div>",
-                    unsafe_allow_html=True,
-                )
+            # Username label first, then the Keluar button — keeps the tap
+            # target on its own row on mobile (full-width via the mobile CSS
+            # rule) without the negative-margin trick that breaks at narrow
+            # widths.
+            st.markdown(
+                f"<div style='font-size:13px; color:#5F6368; margin:6px 0 4px;'>"
+                f"Pengguna: <b style='color:#1C1E21;'>{alias}</b></div>",
+                unsafe_allow_html=True,
+            )
+            if st.button("Keluar", key="cdt_logout", use_container_width=True):
+                _logout()
+                st.rerun()
 
     render_mobile_banner()
     render_mobile_toggle()

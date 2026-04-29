@@ -279,6 +279,111 @@ def test_load_model_performance_missing_dir(tmp_path):
     assert perf["generated_at"] is None
 
 
+# ---------------------------------------------------------------------------
+# Tests — participants_only filter (excludes admin/legacy/test residuals)
+# ---------------------------------------------------------------------------
+def test_cohort_summary_excludes_non_participants(db):
+    """A user without consent / profile / password_hash must be excluded
+    from cohort means when participants_only=True is set, otherwise their
+    rows would distort the UAT statistics shown to the researcher."""
+    base = datetime(2026, 5, 1, tzinfo=timezone.utc)
+
+    # Real participant: registered through auth + consent + profile.
+    real = User(
+        username="real_user",
+        password_hash="$2b$12$xxxxxxxxxxxxxxxxxxxxxx",
+        alias="real_user",
+        experience_level="beginner",
+    )
+    db.add(real); db.flush()
+    _make_profile(db, real.id)
+    db.add(ConsentLog(user_id=real.id, consent_given=True))
+    _make_metric(db, real.id, base, dei=0.10, ocs=0.20, lai=1.10)
+
+    # Admin/legacy artifact: alias-only, no consent, no profile, no auth.
+    ghost = User(alias="pgjson_a2923b81", experience_level="beginner")
+    db.add(ghost); db.flush()
+    _make_metric(db, ghost.id, base, dei=0.90, ocs=0.90, lai=2.50)
+    _make_cdt(db, ghost.id)
+
+    summary_all = get_cohort_summary(db)
+    summary_filt = get_cohort_summary(db, participants_only=True)
+
+    assert summary_all["total_users"] == 2
+    assert summary_filt["total_users"] == 1
+    assert summary_filt["excluded_non_participants"] == 1
+
+    # Means must reflect only the real participant's metrics.
+    assert summary_filt["mean_dei"] == pytest.approx(0.10, abs=1e-3)
+    assert summary_filt["mean_ocs"] == pytest.approx(0.20, abs=1e-3)
+    assert summary_filt["mean_lai"] == pytest.approx(1.10, abs=1e-3)
+    # Stability index from the ghost's CDT must NOT contaminate the mean.
+    assert summary_filt["mean_stability_index"] == 0.0
+
+
+def test_export_users_excludes_non_participants(db):
+    real = User(
+        username="real_export",
+        password_hash="$2b$12$realhash",
+        alias="real_export",
+        experience_level="beginner",
+    )
+    db.add(real); db.flush()
+    _make_profile(db, real.id)
+    db.add(ConsentLog(user_id=real.id, consent_given=True))
+
+    ghost = User(alias="pgjson_legacy", experience_level="beginner")
+    db.add(ghost); db.flush()
+    db.flush()
+
+    rows_all = export_all_users_csv(db)
+    rows_filt = export_all_users_csv(db, participants_only=True)
+    assert len(rows_all) == 2
+    assert len(rows_filt) == 1
+    assert rows_filt[0]["username"] == "real_export"
+
+
+def test_export_sessions_and_snapshots_exclude_non_participants(db):
+    base = datetime(2026, 6, 1, tzinfo=timezone.utc)
+
+    real = User(
+        username="real_sessions",
+        password_hash="$2b$12$realhash",
+        alias="real_sessions",
+        experience_level="beginner",
+    )
+    db.add(real); db.flush()
+    _make_profile(db, real.id)
+    _make_metric(db, real.id, base, dei=0.1)
+
+    ghost = User(alias="pgjson_ghost", experience_level="beginner")
+    db.add(ghost); db.flush()
+    _make_metric(db, ghost.id, base, dei=0.9)
+    db.add(CdtSnapshot(
+        user_id=ghost.id, session_id=str(uuid.uuid4()), session_number=1,
+        cdt_overconfidence=0.5, cdt_disposition=0.5, cdt_loss_aversion=0.5,
+        cdt_risk_preference=0.3, cdt_stability_index=0.5, snapshotted_at=base,
+    ))
+    db.flush()
+
+    sessions = export_all_sessions_csv(db, participants_only=True)
+    snapshots = export_cdt_snapshots_csv(db, participants_only=True)
+    assert all(r["user_id"] == real.id for r in sessions)
+    assert snapshots == []  # ghost's snapshot must be filtered out
+
+
+def test_consent_only_user_qualifies_as_participant(db):
+    """A user whose only signal is an affirmative ConsentLog should still
+    qualify (e.g., consented but not yet completed any session)."""
+    consenting = User(alias="just_consented", experience_level="beginner")
+    db.add(consenting); db.flush()
+    db.add(ConsentLog(user_id=consenting.id, consent_given=True))
+    db.flush()
+
+    rows = export_all_users_csv(db, participants_only=True)
+    assert any(r["user_id"] == consenting.id for r in rows)
+
+
 def test_load_model_performance_with_files(tmp_path):
     summary_payload = {
         "generated_at": "2026-04-23T19:41:57.334641+00:00",

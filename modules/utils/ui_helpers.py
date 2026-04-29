@@ -444,7 +444,15 @@ def build_dual_radar_chart(
 # ---------------------------------------------------------------------------
 
 def inject_custom_css() -> None:
-    """Inject the v6 light-theme CSS polish."""
+    """Inject the v6 light-theme CSS polish.
+
+    Includes mobile-first responsive rules at three breakpoints:
+        - Tablet (≤1024px): nav-button min-width relaxed, metric padding tightened.
+        - Mobile (≤640px): metric cards reflow to single column, nav buttons
+          stretch full-width with smaller font, primary buttons stack with
+          ample tap targets (≥48px), top-padding reduced.
+        - Narrow mobile (≤380px): even tighter margins, smaller metric font.
+    """
     st.markdown("""
     <style>
     html, body, [class*="css"] {
@@ -467,7 +475,7 @@ def inject_custom_css() -> None:
     }
 
     /* Tabs */
-    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
+    .stTabs [data-baseweb="tab-list"] { gap: 8px; flex-wrap: wrap; }
     .stTabs [data-baseweb="tab"] { border-radius: 8px; padding: 8px 16px; }
 
     /* Expanders */
@@ -478,12 +486,14 @@ def inject_custom_css() -> None:
         border-radius: 8px;
         font-weight: 500;
         padding: 12px 24px;
+        min-height: 44px;     /* WCAG 2.5.5 touch target */
     }
     .stButton > button[kind="secondary"] {
         border-radius: 8px;
         background: #FFFFFF;
         color: #1F2937;
         border: 1px solid #E5E7EB;
+        min-height: 44px;
     }
     .stButton > button[kind="secondary"]:hover {
         background: #F3F4F6;
@@ -506,6 +516,118 @@ def inject_custom_css() -> None:
         display: flex;
         flex-direction: column;
         justify-content: space-between;
+    }
+
+    /* ---------------------------------------------------------------- */
+    /* Tablet breakpoint (≤1024px)                                      */
+    /* Relax nav button minimum width so 5 items fit one row, and       */
+    /* tighten metric/form padding so cards don't burn vertical space.  */
+    /* ---------------------------------------------------------------- */
+    @media (max-width: 1024px) {
+        .stButton > button {
+            min-width: 0 !important;
+            font-size: 13px;
+            padding: 10px 12px;
+        }
+        [data-testid="stMetric"] {
+            padding: 12px 14px;
+            min-height: 120px;
+        }
+        [data-testid="stMetricValue"] { font-size: 22px; }
+        [data-testid="stForm"] { padding: 12px; }
+    }
+
+    /* ---------------------------------------------------------------- */
+    /* Mobile breakpoint (≤640px)                                       */
+    /* All buttons go full-width with ≥48px tap target; metric cards    */
+    /* drop their min-height so stacked rows don't leave gaping voids;  */
+    /* radio groups wrap; horizontal section dividers stay narrow.      */
+    /* ---------------------------------------------------------------- */
+    @media (max-width: 640px) {
+        .block-container {
+            padding-top: 1.25rem;
+            padding-left: 1rem;
+            padding-right: 1rem;
+        }
+
+        /* Metric reflow — height-driven instead of grid-driven */
+        [data-testid="stMetric"] {
+            min-height: 0;
+            padding: 12px 14px;
+            margin-bottom: 8px;
+        }
+        [data-testid="stMetricValue"] { font-size: 20px; }
+        [data-testid="stMetricLabel"] { font-size: 12px; }
+        [data-testid="stMetricDelta"] { font-size: 11px; }
+
+        /* Buttons full-width by default with ≥48px tap target */
+        .stButton > button {
+            width: 100% !important;
+            min-height: 48px;
+            font-size: 14px;
+        }
+        .stButton > button[kind="primary"] {
+            padding: 14px 18px;
+        }
+
+        /* Top nav stacks 2-up via responsive_columns; allow long page titles
+           to wrap inside narrow nav buttons cleanly. */
+        .stButton > button {
+            line-height: 1.25;
+            white-space: normal;
+        }
+
+        /* Tabs — wrap to multi-row on narrow viewports */
+        .stTabs [data-baseweb="tab-list"] {
+            flex-wrap: wrap;
+            gap: 4px;
+        }
+        .stTabs [data-baseweb="tab"] {
+            padding: 6px 10px;
+            font-size: 12.5px;
+        }
+
+        /* Radios + select sliders — increase target & wrap labels */
+        [data-testid="stRadio"] label,
+        [data-testid="stSelectSlider"] label {
+            font-size: 13px;
+            line-height: 1.4;
+        }
+
+        /* Forms — tighter padding, no double frames vs containers */
+        [data-testid="stForm"] {
+            padding: 10px;
+            border-radius: 10px;
+        }
+
+        /* Coach-mark + info cards — reduce padding so the body fits */
+        .cdt-coach-card { padding: 18px 16px !important; }
+        .cdt-coach-title { font-size: 18px !important; }
+        .cdt-coach-body  { font-size: 13.5px !important; }
+
+        /* Plotly chart legends often overflow on phones */
+        .js-plotly-plot .legend { font-size: 10px !important; }
+
+        /* Dataframe horizontal scroll affordance */
+        [data-testid="stDataFrame"] { overflow-x: auto; }
+
+        /* Hide the vertical-rule between columns when stacked */
+        [data-testid="stHorizontalBlock"] > [data-testid="column"] {
+            min-width: 0 !important;
+        }
+    }
+
+    /* ---------------------------------------------------------------- */
+    /* Narrow mobile (≤380px) — iPhone SE class                         */
+    /* ---------------------------------------------------------------- */
+    @media (max-width: 380px) {
+        [data-testid="stMetricValue"] { font-size: 18px; }
+        [data-testid="stMetricLabel"] { font-size: 11px; }
+        .stButton > button { font-size: 13px; }
+        .block-container {
+            padding-left: 0.75rem;
+            padding-right: 0.75rem;
+        }
     }
     </style>
     """, unsafe_allow_html=True)

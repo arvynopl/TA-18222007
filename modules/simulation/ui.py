@@ -818,8 +818,11 @@ def render_simulation_page() -> None:
 
     # -----------------------------------------------------------------------
     # Main layout: left (stock list + holdings) | right (chart + order panel)
+    # On mobile, stack the two panels vertically — the [1, 3] desktop ratio
+    # would otherwise crush the stock-picker into ~25% of a 380 px viewport
+    # (~95 px), making the radio labels unreadable.
     # -----------------------------------------------------------------------
-    col_left, col_right = st.columns([1, 3])
+    col_left, col_right = responsive_columns([1, 3], n_mobile=1)
 
     with col_left:
         st.markdown("**Pilih Saham**")
@@ -927,7 +930,7 @@ def render_simulation_page() -> None:
         }
         vol_label, vol_color = _VOL_LABEL.get(vol_class, ("—", "#8b8fa8"))
 
-        hdr_col, badge_col = st.columns([5, 1])
+        hdr_col, badge_col = responsive_columns([5, 1], n_mobile=1)
         with hdr_col:
             st.markdown(
                 f"**{ticker}** — {meta.get('name', '')} "
