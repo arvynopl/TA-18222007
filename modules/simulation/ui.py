@@ -21,6 +21,7 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 from config import INITIAL_CAPITAL, ROUNDS_PER_SESSION
+from modules.utils.layout import is_mobile, responsive_columns
 from modules.utils.ui_helpers import apply_chart_theme, CHART_TEXT, COLOR_GAIN, COLOR_LOSS, render_coach_mark_onboarding
 from database.connection import get_session
 from database.models import StockCatalog
@@ -81,11 +82,93 @@ def compute_projected_end_round_cash(
     return total
 
 
+def _build_compact_line_chart(
+    stock_id: str,
+    pre_history: list[dict],
+    window_data: list[dict],
+    current_round: int,
+) -> go.Figure:
+    """Mobile-friendly closing-price line chart.
+
+    Drops the candlestick + volume subplot in favour of a single line
+    that preserves the bias-relevant information: price trajectory and
+    where the trading window starts. Used when the user enables
+    'Tampilan ringkas untuk mobile' (or when Mode mobile is on).
+    """
+    fig = go.Figure()
+
+    if pre_history:
+        pre_dates = [
+            d["date"].isoformat() if hasattr(d["date"], "isoformat") else str(d["date"])
+            for d in pre_history
+        ]
+        fig.add_trace(go.Scatter(
+            x=pre_dates,
+            y=[d["close"] for d in pre_history],
+            mode="lines",
+            name="Riwayat",
+            line=dict(color="rgba(95,99,104,0.55)", width=1.5),
+            hovertemplate="Tutup: %{y:,.0f}<extra></extra>",
+        ))
+
+    visible = window_data[: current_round]
+    if visible:
+        win_dates = [
+            d["date"].isoformat() if hasattr(d["date"], "isoformat") else str(d["date"])
+            for d in visible
+        ]
+        win_closes = [d["close"] for d in visible]
+        gain = win_closes[-1] >= win_closes[0]
+        fig.add_trace(go.Scatter(
+            x=win_dates,
+            y=win_closes,
+            mode="lines+markers",
+            name="Harga",
+            line=dict(color=(COLOR_GAIN if gain else COLOR_LOSS), width=2),
+            marker=dict(size=4),
+            hovertemplate="Tutup: %{y:,.0f}<extra></extra>",
+        ))
+
+        if current_round > 1:
+            fig.add_shape(
+                type="line",
+                x0=win_dates[0], x1=win_dates[0],
+                y0=0, y1=1,
+                yref="paper",
+                line=dict(dash="dash", color="rgba(74,144,226,0.6)"),
+            )
+            fig.add_annotation(
+                x=win_dates[0],
+                y=1,
+                yref="paper",
+                text="Mulai Trading",
+                showarrow=False,
+                font=dict(size=10, color=CHART_TEXT),
+                xanchor="left",
+            )
+
+    apply_chart_theme(fig, height=280)
+    fig.update_layout(
+        legend=dict(
+            x=0,
+            y=1.18,
+            orientation="h",
+            bgcolor="rgba(0,0,0,0)",
+            font=dict(size=10),
+        ),
+        margin=dict(l=8, r=8, t=24, b=8),
+    )
+    fig.update_xaxes(type="category", gridcolor="rgba(0,0,0,0.08)")
+    fig.update_yaxes(title_text="Harga (Rp)", gridcolor="rgba(0,0,0,0.08)")
+    return fig
+
+
 def _build_full_chart(
     stock_id: str,
     pre_history: list[dict],
     window_data: list[dict],
     current_round: int,
+    compact: bool = False,
 ) -> go.Figure:
     """Build a candlestick + volume chart showing pre-window history + trading window.
 
@@ -95,7 +178,14 @@ def _build_full_chart(
                       Shown dimmed before the trading window starts.
         window_data:  Full 14-day window dicts from sim_window[sid].
         current_round: How many rounds of the window to show (1-indexed).
+        compact:      When True, render a simplified single-line price chart
+                      sized for narrow viewports (mobile). Bias-relevant
+                      information (trajectory, trading window boundary) is
+                      preserved; volume + MA overlays are dropped.
     """
+    if compact:
+        return _build_compact_line_chart(stock_id, pre_history, window_data, current_round)
+
     fig = make_subplots(
         rows=2, cols=1,
         shared_xaxes=True,
@@ -616,7 +706,7 @@ def render_simulation_page() -> None:
         final_value = portfolio.get_total_value(final_prices)
         return_pct = ((final_value - INITIAL_CAPITAL) / INITIAL_CAPITAL) * 100
 
-        c1, c2, c3 = st.columns(3)
+        c1, c2, c3 = responsive_columns(3)
         c1.metric("Nilai Akhir", _format_rupiah(final_value))
         c2.metric("Return", f"{return_pct:+.1f}%")
         c3.metric("Total Transaksi", f"{len(portfolio.get_sold_trades())} trades")
@@ -664,7 +754,7 @@ def render_simulation_page() -> None:
         for sid, pos in portfolio.holdings.items()
     )
 
-    c_val, c_cash, c_rpnl, c_upnl = st.columns(4)
+    c_val, c_cash, c_rpnl, c_upnl = responsive_columns(4, n_mobile=2)
     c_val.metric(
         "Nilai Portofolio",
         _format_rupiah(total_value),
@@ -861,7 +951,7 @@ def render_simulation_page() -> None:
         daily_ret = snap.get("daily_return")
         ret_str = f"{daily_ret * 100:+.2f}%" if daily_ret is not None else "—"
 
-        ind_cols = st.columns(4)
+        ind_cols = responsive_columns(4, n_mobile=2)
         ind_cols[0].metric(
             "Harga Penutupan",
             _format_rupiah(snap["close"]),
@@ -902,8 +992,21 @@ def render_simulation_page() -> None:
 
         st.divider()
 
-        # Candlestick chart
-        fig = _build_full_chart(sid, pre_hist, win_data, current_round)
+        # Mobile-friendly chart toggle. Defaults to ON when global Mode mobile
+        # is active; user can override per-chart. Falls back to candlestick
+        # otherwise.
+        compact_default = is_mobile()
+        compact = st.toggle(
+            "Tampilan ringkas untuk mobile",
+            value=compact_default,
+            key=f"chart_compact_{sid}",
+            help=(
+                "Aktifkan untuk grafik garis sederhana yang lebih mudah dibaca "
+                "di layar telepon. Lintasan harga dan batas mulai trading tetap "
+                "ditampilkan."
+            ),
+        )
+        fig = _build_full_chart(sid, pre_hist, win_data, current_round, compact=compact)
         st.plotly_chart(fig, use_container_width=True, key=f"chart_{sid}_{current_round}")
 
         # Current position info

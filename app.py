@@ -32,6 +32,7 @@ from modules.auth import (
 )
 from modules.feedback.renderer import render_feedback_page
 from modules.simulation.ui import render_simulation_page
+from modules.utils.layout import render_mobile_toggle, responsive_columns
 from modules.utils.log_config import configure_logging
 from modules.utils.ui_helpers import (
     NAV_ITEMS, fmt_datetime_wib, inject_custom_css,
@@ -54,6 +55,40 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
 )
+
+
+# ---------------------------------------------------------------------------
+# Streamlit Cloud safety guard
+# ---------------------------------------------------------------------------
+# On Streamlit Community Cloud the container filesystem is ephemeral. If
+# CDT_DATABASE_URL is unset the app would silently fall back to a local
+# SQLite file and lose every write on the next redeploy. Refuse to start
+# in that scenario rather than corrupting UAT data.
+def _looks_like_streamlit_cloud() -> bool:
+    if os.environ.get("STREAMLIT_RUNTIME_ENV") == "cloud":
+        return True
+    if os.environ.get("STREAMLIT_SHARING_MODE"):
+        return True
+    if os.path.exists("/mount/src"):  # Streamlit Cloud working directory
+        return True
+    hostname = os.environ.get("HOSTNAME", "")
+    return "streamlit" in hostname.lower()
+
+
+if _looks_like_streamlit_cloud() and not os.environ.get("CDT_DATABASE_URL"):
+    st.error(
+        "**Konfigurasi belum lengkap.** Variabel `CDT_DATABASE_URL` belum "
+        "diatur pada Streamlit Cloud Secrets. Aplikasi dihentikan untuk "
+        "mencegah kehilangan data: file SQLite lokal pada Streamlit Cloud "
+        "akan terhapus setiap kali container di-redeploy.\n\n"
+        "**Cara memperbaiki:** buka *App settings → Secrets* lalu tambahkan:\n\n"
+        "```toml\n"
+        'CDT_DATABASE_URL = "postgresql://<user>:<pass>@<host>.neon.tech/<db>?sslmode=require"\n'
+        "```\n\n"
+        "Lihat `README_DEPLOY.md` untuk panduan lengkap."
+    )
+    logger.error("Refusing to start on Streamlit Cloud without CDT_DATABASE_URL set.")
+    st.stop()
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +172,7 @@ def _render_header() -> None:
                 )
 
     render_mobile_banner()
+    render_mobile_toggle()
 
     clicked = render_top_nav(current, enabled_map)
     if clicked != current:
@@ -589,7 +625,7 @@ def _page_profil() -> None:
         "diperbarui setelah setiap sesi."
     )
 
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3 = responsive_columns(3)
     rp = profile_data["risk_preference"]
     rp_label = (
         "Agresif" if rp >= 0.6
