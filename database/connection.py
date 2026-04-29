@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from typing import Generator, Optional
+from urllib.parse import urlparse
 
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
@@ -37,17 +38,51 @@ _engine: Optional[Engine] = None
 _SessionFactory: Optional[sessionmaker] = None
 
 
+def _validate_neon_host(url: str) -> None:
+    """Raise ValueError for Neon URLs missing the region segment.
+
+    Modern Neon connection strings embed the region: e.g.
+    ``ep-cool-name-12345.ap-southeast-1.aws.neon.tech``. A bare
+    ``ep-cool-name-12345.neon.tech`` does not resolve via DNS, and psycopg2's
+    error ("could not translate host name") obscures the root cause.
+    """
+    try:
+        host = urlparse(url).hostname or ""
+    except ValueError:
+        return
+    if not host.endswith(".neon.tech"):
+        return
+    # Acceptable hosts have at least 4 dot-separated labels:
+    #   ep-<id>.<region>.<cloud>.neon.tech
+    # Plus optional `-pooler` suffix on the endpoint label, which is fine.
+    if host.count(".") < 3:
+        raise ValueError(
+            f"Neon hostname {host!r} is missing the region segment. "
+            "Expected the form 'ep-<id>.<region>.<cloud>.neon.tech' "
+            "(e.g. 'ep-cool-name-12345.ap-southeast-1.aws.neon.tech'). "
+            "Copy the connection string from the Neon dashboard's "
+            "'Connection Details' panel and update CDT_DATABASE_URL."
+        )
+
+
 def _normalize_db_url(url: str) -> str:
     """Normalise a database URL for SQLAlchemy 2.x.
 
+    - Strips surrounding whitespace (a frequent copy-paste artefact in
+      ``.streamlit/secrets.toml`` and shell exports).
     - ``postgres://...`` (Neon, Heroku-style) → ``postgresql://...``
     - ``postgresql://...`` (no driver) → ``postgresql+psycopg2://...``
+    - Validates Neon hostnames so a missing region segment fails fast with a
+      helpful error rather than a cryptic DNS failure inside psycopg2.
     - All other schemes (sqlite, postgresql+psycopg2, etc.) returned unchanged.
     """
+    url = url.strip()
     if url.startswith("postgres://"):
         url = "postgresql://" + url[len("postgres://"):]
     if url.startswith("postgresql://"):
         url = "postgresql+psycopg2://" + url[len("postgresql://"):]
+    if url.startswith("postgresql+psycopg2://"):
+        _validate_neon_host(url)
     return url
 
 
