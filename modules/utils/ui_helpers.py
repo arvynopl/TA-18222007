@@ -86,6 +86,7 @@ NAV_ITEMS = [
     ("Simulasi Investasi", "Simulasi Investasi"),
     ("Hasil Analisis & Umpan Balik", "Hasil Analisis & Umpan Balik"),
     ("Profil Kognitif Saya", "Profil Kognitif Saya"),
+    ("Feedback Penguji", "Feedback Penguji"),
 ]
 
 # Pre-measured minimum width accommodates the longest label in bold:

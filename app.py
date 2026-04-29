@@ -141,6 +141,7 @@ def _render_header() -> None:
         "Simulasi Investasi": user_logged_in,
         "Hasil Analisis & Umpan Balik": has_sessions,
         "Profil Kognitif Saya": has_sessions,
+        "Feedback Penguji": user_logged_in,
     }
 
     current = st.session_state["current_page"]
@@ -854,11 +855,207 @@ def _page_hasil() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Page: Feedback Penguji (UAT)
+# ---------------------------------------------------------------------------
+# 10 SUS items in Bahasa Indonesia. Translation is ad-hoc, pending validation —
+# we are not aware of a peer-reviewed published Indonesian SUS at the time of
+# Phase 4 deployment; researchers should treat scores as exploratory until a
+# validated translation is sourced. Items 1,3,5,7,9 are positive (odd); items
+# 2,4,6,8,10 are negative (even). Standard scoring applied in UATFeedback.sus_score.
+_SUS_ITEMS_ID: list[tuple[str, str]] = [
+    ("sus_q1",  "Saya merasa ingin sering menggunakan sistem ini."),
+    ("sus_q2",  "Saya merasa sistem ini terlalu rumit untuk digunakan."),
+    ("sus_q3",  "Saya merasa sistem ini mudah digunakan."),
+    ("sus_q4",  "Saya merasa membutuhkan bantuan teknis untuk dapat menggunakan sistem ini."),
+    ("sus_q5",  "Saya merasa berbagai fungsi dalam sistem ini terintegrasi dengan baik."),
+    ("sus_q6",  "Saya merasa terlalu banyak ketidakkonsistenan dalam sistem ini."),
+    ("sus_q7",  "Saya rasa kebanyakan orang akan dapat mempelajari sistem ini dengan cepat."),
+    ("sus_q8",  "Saya merasa sistem ini sangat tidak praktis untuk digunakan."),
+    ("sus_q9",  "Saya merasa percaya diri saat menggunakan sistem ini."),
+    ("sus_q10", "Saya perlu mempelajari banyak hal sebelum dapat menggunakan sistem ini."),
+]
+
+
+def _page_feedback_penguji() -> None:
+    st.title("Feedback Penguji (UAT)")
+    st.caption(
+        "Halaman ini ditujukan bagi penguji UAT. Mohon isi kuesioner *System "
+        "Usability Scale* (SUS) di bawah setelah menyelesaikan setidaknya satu "
+        "sesi simulasi. Pengisian membutuhkan waktu sekitar 3 menit."
+    )
+
+    user_id = st.session_state.get("user_id")
+    if not user_id:
+        st.warning("Silakan masuk terlebih dahulu di halaman Beranda.")
+        return
+
+    from database.models import UATFeedback
+
+    with get_session() as sess:
+        existing = (
+            sess.query(UATFeedback)
+            .filter_by(user_id=user_id)
+            .order_by(UATFeedback.submitted_at.desc())
+            .first()
+        )
+        existing_score = existing.sus_score if existing else None
+        existing_submitted = existing.submitted_at if existing else None
+
+    if existing is not None:
+        st.success(
+            f"Anda telah mengirim respons SUS pada "
+            f"{fmt_datetime_wib(existing_submitted)} (skor: {existing_score:.1f}/100). "
+            f"Anda boleh mengirim ulang — respons terbaru yang akan dipakai untuk analisis."
+        )
+
+    st.markdown("#### Kuesioner SUS")
+    st.caption(
+        "Skala 1 = Sangat Tidak Setuju, 5 = Sangat Setuju. "
+        "Pilih nilai yang paling sesuai dengan pengalaman Anda."
+    )
+
+    with st.form("uat_sus_form"):
+        responses: dict[str, int] = {}
+        for key, prompt in _SUS_ITEMS_ID:
+            responses[key] = st.select_slider(
+                prompt,
+                options=[1, 2, 3, 4, 5],
+                value=3,
+                format_func=lambda x: _LIKERT_LABELS[x],
+                key=f"uat_{key}",
+            )
+
+        st.markdown("#### Pertanyaan Terbuka")
+        confusing = st.text_area(
+            "Apa yang membingungkan?",
+            placeholder="Bagian sistem mana yang membingungkan atau sulit dipahami?",
+            max_chars=2000,
+            height=120,
+            key="uat_open_confusing",
+        )
+        useful = st.text_area(
+            "Apa yang berguna?",
+            placeholder="Fitur atau bagian mana yang Anda rasa paling membantu?",
+            max_chars=2000,
+            height=120,
+            key="uat_open_useful",
+        )
+
+        submitted = st.form_submit_button(
+            "Kirim Tanggapan", type="primary", use_container_width=True,
+        )
+
+    if submitted:
+        sid = st.session_state.get("last_session_id")
+        try:
+            with get_session() as sess:
+                fb = UATFeedback(
+                    user_id=user_id,
+                    session_id=sid,
+                    open_confusing=(confusing or "").strip() or None,
+                    open_useful=(useful or "").strip() or None,
+                    **responses,
+                )
+                sess.add(fb)
+                sess.flush()
+                computed_score = fb.sus_score
+            st.success(
+                f"Terima kasih! Tanggapan Anda telah disimpan. "
+                f"Skor SUS Anda: **{computed_score:.1f}/100**."
+            )
+            logger.info(
+                "UAT feedback submitted: user=%s sus_score=%.1f", user_id, computed_score
+            )
+        except Exception:
+            logger.exception("Failed to persist UAT feedback for user %s", user_id)
+            st.error(
+                "Tanggapan gagal disimpan. Silakan coba lagi atau hubungi peneliti."
+            )
+
+
+# ---------------------------------------------------------------------------
+# Admin dashboard (token-gated, query-param triggered)
+# ---------------------------------------------------------------------------
+def _maybe_render_admin() -> bool:
+    """If ?admin=<CDT_ADMIN_TOKEN> is in the URL, render the admin dashboard.
+
+    Returns True if the admin dashboard was rendered (caller should stop
+    further routing).
+    """
+    expected = os.environ.get("CDT_ADMIN_TOKEN")
+    qp = st.query_params
+
+    # Streamlit returns None / empty list when the key is absent.
+    raw = qp.get("admin", None)
+    if not raw:
+        return False
+    token = raw if isinstance(raw, str) else (raw[0] if raw else None)
+    if not token:
+        return False
+
+    st.title("Admin Dashboard")
+    if not expected:
+        st.error(
+            "Variabel lingkungan `CDT_ADMIN_TOKEN` belum dikonfigurasi pada server."
+        )
+        st.stop()
+    if token != expected:
+        st.error("Token admin tidak valid.")
+        st.stop()
+
+    from database.models import (
+        BiasMetric as _BM, SessionError as _SE, SessionSummary as _SS,
+        UATFeedback as _UF, User as _U,
+    )
+
+    with get_session() as sess:
+        total_users = sess.query(_U).count()
+        total_sessions = sess.query(_SS).count()
+        completed_sessions = (
+            sess.query(_SS).filter(_SS.status == "completed").count()
+        )
+        in_progress_sessions = (
+            sess.query(_SS).filter(_SS.status == "in_progress").count()
+        )
+        total_metrics = sess.query(_BM).count()
+        total_errors = sess.query(_SE).count()
+        total_uat = sess.query(_UF).count()
+        sus_scores = [fb.sus_score for fb in sess.query(_UF).all()]
+
+    error_rate = (total_errors / total_sessions) if total_sessions else 0.0
+    avg_sus = (sum(sus_scores) / len(sus_scores)) if sus_scores else None
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total Pengguna", total_users)
+    c2.metric("Total Sesi", total_sessions)
+    c3.metric("Sesi Selesai", completed_sessions)
+
+    c4, c5, c6 = st.columns(3)
+    c4.metric("Sesi Berjalan", in_progress_sessions)
+    c5.metric("Bias Metrics Tersimpan", total_metrics)
+    c6.metric("Error per Sesi", f"{error_rate:.2f}")
+
+    c7, c8 = st.columns(2)
+    c7.metric("Respons UAT (SUS)", total_uat)
+    c8.metric("Rata-rata SUS", f"{avg_sus:.1f}" if avg_sus is not None else "—")
+
+    st.divider()
+    st.caption(
+        "Endpoint terlindungi token. Untuk mengekspor data lengkap, jalankan "
+        "`export_uat_summary()` lokal terhadap database produksi."
+    )
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Router
 # ---------------------------------------------------------------------------
 def main() -> None:
     _init_session_state()
     inject_custom_css()
+
+    if _maybe_render_admin():
+        return
 
     _render_header()
 
@@ -875,6 +1072,8 @@ def main() -> None:
         _page_hasil()
     elif page == "Profil Kognitif Saya":
         _page_profil()
+    elif page == "Feedback Penguji":
+        _page_feedback_penguji()
 
 
 if __name__ == "__main__":
