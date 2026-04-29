@@ -34,6 +34,13 @@ The app opens at `http://localhost:8501`.
 ### For UAT Participants
 See [UAT_GUIDE.md](UAT_GUIDE.md) for step-by-step instructions in Bahasa Indonesia.
 
+### For Researchers
+A hidden cohort-level inspection page is available at `http://localhost:8501/?view=researcher`
+when the `CDT_RESEARCHER_PASSWORD` environment variable is set. It provides
+cohort summary KPIs, per-user table, bias distributions, longitudinal CDT
+trajectories, survey-vs-observed validation, ML model performance, and bulk
+CSV exports — all read-only. See [CLAUDE.md](CLAUDE.md) for setup details.
+
 ---
 
 ## System Overview

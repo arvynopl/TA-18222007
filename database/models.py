@@ -1,10 +1,11 @@
 """
 database/models.py — SQLAlchemy ORM entity definitions.
 
-Twelve SQLAlchemy ORM entities + indexes (incl. PostSessionSurvey, CdtSnapshot):
+SQLAlchemy ORM entities + indexes:
     User, StockCatalog, MarketSnapshot, UserAction,
     BiasMetric, CognitiveProfile, FeedbackHistory,
-    ConsentLog, UserSurvey, SessionSummary, CdtSnapshot, PostSessionSurvey
+    ConsentLog, UserSurvey, SessionSummary, CdtSnapshot, PostSessionSurvey,
+    UATFeedback, SessionError
 """
 
 from datetime import datetime, timezone, date as date_type
@@ -524,3 +525,90 @@ class PostSessionSurvey(Base):
             f"<PostSessionSurvey user={self.user_id} session={self.session_id[:8]} "
             f"OC={self.self_overconfidence} DEI={self.self_disposition} LA={self.self_loss_aversion}>"
         )
+
+
+class UATFeedback(Base):
+    """SUS (System Usability Scale) responses + open-ended feedback from UAT testers.
+
+    Captures the 10 standard SUS items (1–5 Likert) plus two free-text fields
+    (apa yang membingungkan, apa yang berguna). The SUS score is computable on
+    read via :meth:`sus_score` (0–100, higher = better usability).
+    """
+
+    __tablename__ = "uat_feedback"
+    __table_args__ = (
+        Index("ix_uatfeedback_user", "user_id"),
+    )
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    user_id: int = Column(Integer, ForeignKey("users.id"), nullable=False)
+    session_id: Optional[str] = Column(String(36), nullable=True)
+
+    sus_q1: int = Column(Integer, nullable=False)
+    sus_q2: int = Column(Integer, nullable=False)
+    sus_q3: int = Column(Integer, nullable=False)
+    sus_q4: int = Column(Integer, nullable=False)
+    sus_q5: int = Column(Integer, nullable=False)
+    sus_q6: int = Column(Integer, nullable=False)
+    sus_q7: int = Column(Integer, nullable=False)
+    sus_q8: int = Column(Integer, nullable=False)
+    sus_q9: int = Column(Integer, nullable=False)
+    sus_q10: int = Column(Integer, nullable=False)
+
+    open_confusing: Optional[str] = Column(Text, nullable=True)
+    open_useful: Optional[str] = Column(Text, nullable=True)
+
+    submitted_at: datetime = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    @property
+    def sus_score(self) -> float:
+        """Standard SUS score: ((odd-1) + (5-even)) * 2.5, range 0–100."""
+        odd = (
+            (self.sus_q1 - 1)
+            + (self.sus_q3 - 1)
+            + (self.sus_q5 - 1)
+            + (self.sus_q7 - 1)
+            + (self.sus_q9 - 1)
+        )
+        even = (
+            (5 - self.sus_q2)
+            + (5 - self.sus_q4)
+            + (5 - self.sus_q6)
+            + (5 - self.sus_q8)
+            + (5 - self.sus_q10)
+        )
+        return (odd + even) * 2.5
+
+    def __repr__(self) -> str:
+        return f"<UATFeedback user={self.user_id} sus={self.sus_score:.1f}>"
+
+
+class SessionError(Base):
+    """Lightweight DB-backed error counter (no third-party APM).
+
+    One row per error event, queryable for /admin error-rate dashboard.
+    """
+
+    __tablename__ = "session_errors"
+    __table_args__ = (
+        Index("ix_sessionerror_session", "session_id"),
+    )
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    user_id: Optional[int] = Column(Integer, ForeignKey("users.id"), nullable=True)
+    session_id: Optional[str] = Column(String(36), nullable=True)
+    error_type: str = Column(String(64), nullable=False)
+    message: Optional[str] = Column(Text, nullable=True)
+    occurred_at: datetime = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    def __repr__(self) -> str:
+        sid = (self.session_id or "")[:8]
+        return f"<SessionError session={sid} type={self.error_type}>"

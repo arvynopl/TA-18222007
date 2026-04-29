@@ -3,8 +3,9 @@
 from modules.utils.ui_helpers import NAV_ITEMS
 
 
-def test_nav_has_four_entries():
-    assert len(NAV_ITEMS) == 4
+def test_nav_has_five_entries():
+    # v6 (Phase 4): added "Feedback Penguji" UAT instrumentation page.
+    assert len(NAV_ITEMS) == 5
 
 
 def test_nav_labels_match_spec():
@@ -14,6 +15,7 @@ def test_nav_labels_match_spec():
         "Simulasi Investasi",
         "Hasil Analisis & Umpan Balik",
         "Profil Kognitif Saya",
+        "Feedback Penguji",
     ]
 
 

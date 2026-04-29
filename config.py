@@ -2,6 +2,13 @@
 config.py — Central configuration for the CDT Bias Detection System.
 
 All tunable parameters, thresholds, and paths are defined here.
+
+Environment variables:
+    CDT_DATABASE_URL          — Override default sqlite path.
+    CDT_BCRYPT_ROUNDS         — Override default bcrypt cost factor (12).
+    CDT_ADMIN_TOKEN           — Token for ``?admin=...`` admin dashboard.
+    CDT_RESEARCHER_PASSWORD   — Password for the hidden researcher view at
+                                ``?view=researcher``. Unset → view disabled.
 """
 
 import os
@@ -79,6 +86,12 @@ BCRYPT_ROUNDS: int = int(os.environ.get("CDT_BCRYPT_ROUNDS", "12"))
 AUTH_RATE_LIMIT_MAX: int = 5
 AUTH_RATE_LIMIT_WINDOW_SEC: int = 600  # 10 minutes
 AUTH_PASSWORD_MIN_LEN: int = 8
+
+# ---------------------------------------------------------------------------
+# Researcher view — password gate via env var. None = view disabled.
+# Enables the hidden ``?view=researcher`` URL for cohort-level UAT inspection.
+# ---------------------------------------------------------------------------
+RESEARCHER_PASSWORD: str | None = os.environ.get("CDT_RESEARCHER_PASSWORD") or None
 
 # ---------------------------------------------------------------------------
 # Stock catalog

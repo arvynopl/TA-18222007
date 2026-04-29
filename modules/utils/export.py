@@ -15,7 +15,10 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from database.models import BiasMetric, CognitiveProfile, FeedbackHistory, UserAction, UserSurvey
+from database.models import (
+    BiasMetric, CognitiveProfile, FeedbackHistory, SessionError, SessionSummary,
+    UATFeedback, UserAction, UserSurvey,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -277,3 +280,87 @@ def export_session_data(
         user_id, session_id[:8], output_dir, len(written),
     )
     return written
+
+
+def export_uat_summary(db_session: Session) -> list[dict]:
+    """Aggregate per-session UAT data: bias metrics, SUS scores, error counts.
+
+    Joins on user_id (and session_id where applicable) so each row represents
+    one simulation session enriched with the tester's most recent SUS response
+    and the count of session-scoped errors. Designed for post-UAT statistical
+    analysis (researcher-only — not exposed to testers).
+
+    Returns:
+        List of dicts ordered by user_id then session computed_at.
+    """
+    metrics = (
+        db_session.query(BiasMetric)
+        .order_by(BiasMetric.user_id, BiasMetric.computed_at)
+        .all()
+    )
+
+    rows: list[dict] = []
+    for m in metrics:
+        # Most recent UAT feedback for this user (SUS scores are user-level, not
+        # session-level — testers fill in once after exploring the prototype).
+        sus = (
+            db_session.query(UATFeedback)
+            .filter_by(user_id=m.user_id)
+            .order_by(UATFeedback.submitted_at.desc())
+            .first()
+        )
+        summary = (
+            db_session.query(SessionSummary)
+            .filter_by(user_id=m.user_id, session_id=m.session_id)
+            .first()
+        )
+        error_count = (
+            db_session.query(SessionError)
+            .filter_by(session_id=m.session_id)
+            .count()
+        )
+        rows.append({
+            "user_id": m.user_id,
+            "session_id": m.session_id,
+            "session_status": summary.status if summary else None,
+            "rounds_completed": summary.rounds_completed if summary else None,
+            "started_at": summary.started_at.isoformat() if summary and summary.started_at else None,
+            "completed_at": (
+                summary.completed_at.isoformat()
+                if summary and summary.completed_at else None
+            ),
+            "computed_at": m.computed_at.isoformat() if m.computed_at else None,
+            "overconfidence_score": m.overconfidence_score,
+            "disposition_pgr": m.disposition_pgr,
+            "disposition_plr": m.disposition_plr,
+            "disposition_dei": m.disposition_dei,
+            "loss_aversion_index": m.loss_aversion_index,
+            "sus_score": sus.sus_score if sus else None,
+            "sus_submitted_at": (
+                sus.submitted_at.isoformat() if sus and sus.submitted_at else None
+            ),
+            "sus_open_confusing": sus.open_confusing if sus else None,
+            "sus_open_useful": sus.open_useful if sus else None,
+            "session_error_count": error_count,
+        })
+    return rows
+
+
+def log_session_error(
+    db_session: Session,
+    *,
+    user_id: int | None,
+    session_id: str | None,
+    error_type: str,
+    message: str | None = None,
+) -> SessionError:
+    """Persist one SessionError row. Lightweight DB-backed counter."""
+    err = SessionError(
+        user_id=user_id,
+        session_id=session_id,
+        error_type=error_type,
+        message=message,
+    )
+    db_session.add(err)
+    db_session.flush()
+    return err
