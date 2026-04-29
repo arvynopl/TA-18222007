@@ -1,0 +1,3 @@
+user_id,session_id,session_status,rounds_completed,started_at,completed_at,computed_at,overconfidence_score,disposition_pgr,disposition_plr,disposition_dei,loss_aversion_index,sus_score,sus_submitted_at,sus_open_confusing,sus_open_useful,session_error_count
+1,ce6696c2-f3d4-4816-8c46-1223b8fb5941,completed,14,2026-04-29T06:04:00.888589,2026-04-29T06:04:00.888591,2026-04-29T06:04:00.887072,0.0,0.0,0.0,0.0,0.0,90.0,2026-04-29T06:04:00.890494,Tidak ada yang membingungkan.,Penjelasan bias terasa relevan.,0
+2,8266d1f6-b554-4f30-a83f-c04b1b409d58,completed,14,2026-04-29T06:04:00.955740,2026-04-29T06:04:00.955743,2026-04-29T06:04:00.955350,0.0,0.0,0.0,0.0,0.0,67.5,2026-04-29T06:04:00.957024,Grafik radar sedikit ramai.,Ekspor CSV sangat membantu.,1
