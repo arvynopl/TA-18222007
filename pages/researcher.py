@@ -137,7 +137,7 @@ def _section_summary(summary: dict) -> None:
     row1[1].metric("Total Sesi", summary["total_sessions"])
     row1[2].metric("Pengguna ≥3 Sesi", summary["users_with_min_3_sessions"])
     row1[3].metric(
-        "Tingkat Kelengkapan",
+        "Kelengkapan UAT",
         f"{summary['completion_rate'] * 100:.1f}%",
         help="Proporsi pengguna yang menyelesaikan minimal 3 sesi.",
     )
@@ -147,8 +147,9 @@ def _section_summary(summary: dict) -> None:
     row2[1].metric("Rata-rata OCS", f"{summary['mean_ocs']:.3f}")
     row2[2].metric("Rata-rata LAI", f"{summary['mean_lai']:.3f}")
     row2[3].metric(
-        "Rata-rata Stability Index",
+        "Rata-rata Stabilitas",
         f"{summary['mean_stability_index']:.3f}",
+        help="Stability Index rata-rata kohort (0–1).",
     )
 
     with st.expander("Detail tambahan"):
@@ -245,10 +246,18 @@ def _section_distributions(sessions_rows: list[dict]) -> None:
                     x=val,
                     line=dict(color=SEVERITY_COLORS[sev], width=1.5, dash="dash"),
                     annotation_text=sev,
-                    annotation_position="top right",
+                    annotation_position="top",
+                    annotation_yanchor="bottom",
+                    annotation_textangle=-90,
+                    annotation_bgcolor="rgba(255,255,255,0.85)",
+                    annotation_bordercolor=SEVERITY_COLORS[sev],
+                    annotation_borderwidth=1,
+                    annotation_borderpad=2,
+                    annotation_font=dict(size=10),
                 )
             fig.update_layout(title=title, showlegend=False)
-            apply_chart_theme(fig, height=320)
+            apply_chart_theme(fig, height=340)
+            fig.update_layout(margin=dict(t=56))
             st.plotly_chart(fig, use_container_width=True)
 
 
@@ -476,6 +485,19 @@ def _section_bulk_export(
 def render_researcher_page() -> None:
     """Render the full researcher view (after auth)."""
     inject_custom_css()
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stMetricLabel"] > div {
+            white-space: normal;
+            overflow: visible;
+            text-overflow: clip;
+            line-height: 1.2;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     if not _ensure_authenticated():
         return
 
