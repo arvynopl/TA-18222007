@@ -119,6 +119,29 @@ def render_mobile_toggle() -> None:
     render_viewport_override()
 
 
+def responsive_tabs(labels: list[str]):
+    """Return tab-like context managers: st.tabs on desktop, expanders on mobile.
+
+    On desktop returns ``st.tabs(labels)`` directly (a Streamlit TabList).
+    On mobile returns a list of ``st.expander(label, expanded=...)`` contexts —
+    the first expander is open by default; the rest are collapsed.
+
+    All elements support the ``with tabs[i]:`` pattern in both modes.
+
+    Args:
+        labels: Ordered list of tab/expander labels.
+
+    Returns:
+        A list of context managers of length ``len(labels)``.
+    """
+    if not is_mobile():
+        return st.tabs(labels)
+    return [
+        st.expander(label, expanded=(i == 0))
+        for i, label in enumerate(labels)
+    ]
+
+
 def responsive_columns(
     spec_desktop: Union[int, Sequence[float]],
     n_mobile: int = 1,

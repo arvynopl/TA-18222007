@@ -5,14 +5,16 @@ Halaman tersembunyi untuk inspeksi data UAT pada level kohort. Akses melalui
 URL ``/?view=researcher`` dan dilindungi kata sandi (env var
 ``CDT_RESEARCHER_PASSWORD``). Tidak ada tombol navigasi di header utama.
 
-Bagian:
+Bagian (urutan tab):
     1. Ringkasan Kohort UAT
     2. Tabel Peserta
     3. Distribusi Bias (DEI / OCS / LAI)
     4. Trajektori CDT Longitudinal
-    5. Survei vs. Hasil Observasi
-    6. Performa Model ML
-    7. Ekspor Massal CSV
+    5. Korelasi Inter-Bias
+    6. Progresi Kohort per Sesi
+    7. Survei vs. Hasil Observasi
+    8. Performa Model ML
+    9. Ekspor Massal CSV
 """
 
 from __future__ import annotations
@@ -21,15 +23,27 @@ import csv
 import io
 import logging
 import math
+from collections import Counter
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+from plotly.subplots import make_subplots
 
 import config
 from database.connection import get_session
-from modules.utils.layout import responsive_columns
+from modules.utils.layout import responsive_columns, responsive_tabs
+from modules.utils.research_charts import (
+    bootstrap_ci,
+    kde_values,
+    ols_confidence_band,
+    ols_fit,
+    pearson_with_p,
+    significance_stars,
+)
 from modules.utils.research_export import (
+    compute_cohort_session_progression,
     export_all_sessions_csv,
     export_all_users_csv,
     export_cdt_snapshots_csv,
@@ -42,6 +56,25 @@ from modules.utils.ui_helpers import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Colour for data below the "mild" threshold (no bias zone).
+_NO_BIAS_COLOR = "#d1d5db"
+
+# Quartile line colours for the trajectory chart (Q1=blue … Q4=red).
+_Q_COLORS = ["#60a5fa", "#4ade80", "#fb923c", "#f87171"]
+_Q_LABELS = [
+    "Kuartil 1 (terendah)",
+    "Kuartil 2",
+    "Kuartil 3",
+    "Kuartil 4 (tertinggi)",
+]
+
+# Bias display metadata used by multiple sections.
+_BIAS_META = {
+    "dei": ("DEI (|DEI|)", "#3b82f6"),
+    "ocs": ("OCS", "#22c55e"),
+    "lai": ("LAI", "#f59e0b"),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -73,6 +106,48 @@ def _pearson(xs: list[float], ys: list[float]) -> float | None:
         return None
     cov = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
     return cov / math.sqrt(sx * sy)
+
+
+def _hex_to_rgba(hex_color: str, alpha: float) -> str:
+    """Convert #rrggbb to rgba(r,g,b,alpha)."""
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
+
+
+def _mobile_scroll_top() -> None:
+    """Inject a CSS-only 'Ke atas' floating action button for mobile."""
+    st.markdown(
+        """
+        <style>
+        @media (max-width: 640px) {
+            .cdt-scroll-top {
+                position: fixed;
+                bottom: 24px;
+                right: 20px;
+                z-index: 9999;
+                background: #1e3a5f;
+                color: #ffffff;
+                border-radius: 50%;
+                width: 48px;
+                height: 48px;
+                font-size: 22px;
+                font-weight: bold;
+                text-align: center;
+                line-height: 48px;
+                text-decoration: none;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.35);
+                display: block;
+            }
+            .cdt-scroll-top:hover { background: #2563eb; color: #fff; }
+        }
+        @media (min-width: 641px) { .cdt-scroll-top { display: none; } }
+        </style>
+        <a class="cdt-scroll-top" href="#" onclick="window.scrollTo(0,0);return false;"
+           title="Ke atas">↑</a>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -167,7 +242,8 @@ def _section_users_table(users_rows: list[dict]) -> None:
     st.subheader("Tabel Peserta")
     st.caption(
         "Satu baris per pengguna, mencakup demografi, hasil onboarding, "
-        "ringkasan survei pasca-sesi, dan vektor CDT terkini."
+        "ringkasan survei pasca-sesi, dan vektor CDT terkini. "
+        "Kolom CDT ditampilkan sebagai progress bar (skala 0–1)."
     )
     if not users_rows:
         st.info("Belum ada pengguna terdaftar.")
@@ -180,14 +256,23 @@ def _section_users_table(users_rows: list[dict]) -> None:
         column_config={
             "user_id": st.column_config.NumberColumn("ID"),
             "session_count": st.column_config.NumberColumn("Jumlah Sesi"),
-            "cdt_overconfidence": st.column_config.NumberColumn(
-                "CDT OC", format="%.3f",
+            "cdt_overconfidence": st.column_config.ProgressColumn(
+                "CDT OC (Keyakinan Berlebih)",
+                min_value=0.0,
+                max_value=1.0,
+                format="%.3f",
             ),
-            "cdt_disposition": st.column_config.NumberColumn(
-                "CDT DEI", format="%.3f",
+            "cdt_disposition": st.column_config.ProgressColumn(
+                "CDT DEI (Efek Disposisi)",
+                min_value=0.0,
+                max_value=1.0,
+                format="%.3f",
             ),
-            "cdt_loss_aversion": st.column_config.NumberColumn(
-                "CDT LAI", format="%.3f",
+            "cdt_loss_aversion": st.column_config.ProgressColumn(
+                "CDT LAI (Aversi Kerugian)",
+                min_value=0.0,
+                max_value=1.0,
+                format="%.3f",
             ),
             "stability_index": st.column_config.NumberColumn(
                 "Stability", format="%.3f",
@@ -209,7 +294,8 @@ def _section_users_table(users_rows: list[dict]) -> None:
 def _section_distributions(sessions_rows: list[dict]) -> None:
     st.subheader("Distribusi Bias")
     st.caption(
-        "Histogram intensitas bias seluruh sesi UAT. Garis vertikal "
+        "Histogram intensitas bias seluruh sesi UAT dengan overlay KDE "
+        "(kernel triangular).  Batang diwarnai per zona keparahan; garis vertikal "
         "menandai ambang ringan/sedang/berat dari `config.py`."
     )
     if not sessions_rows:
@@ -233,32 +319,121 @@ def _section_distributions(sessions_rows: list[dict]) -> None:
             if not values:
                 st.caption(f"Tidak ada data {title}.")
                 continue
-            fig = go.Figure()
-            fig.add_trace(go.Histogram(
-                x=values,
-                marker=dict(color=SEVERITY_COLORS["mild"]),
-                opacity=0.85,
-                nbinsx=20,
+
+            arr = np.array(values, dtype=float)
+            n = len(arr)
+            v_min, v_max = float(arr.min()), float(arr.max())
+            span = max(v_max - v_min, 1e-6)
+            t0, t1, t2 = thresholds
+
+            # Pre-bin for per-severity bar coloring.
+            bins_lo = max(0.0, v_min - 0.05 * span)
+            bins_hi = v_max + 0.1 * span
+            n_bins = 20
+            bin_edges = np.linspace(bins_lo, bins_hi, n_bins + 1)
+            bin_width = float(bin_edges[1] - bin_edges[0])
+            bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.0
+            counts, _ = np.histogram(arr, bins=bin_edges)
+            density = counts / (n * bin_width) if n > 0 else counts.astype(float)
+
+            def _sev_color(x: float) -> str:
+                if x < t0:
+                    return _NO_BIAS_COLOR
+                elif x < t1:
+                    return SEVERITY_COLORS["mild"]
+                elif x < t2:
+                    return SEVERITY_COLORS["moderate"]
+                return SEVERITY_COLORS["severe"]
+
+            bar_colors = [_sev_color(bc) for bc in bin_centers.tolist()]
+
+            # KDE on a fine grid.
+            x_grid = np.linspace(bins_lo, bins_hi + 0.05 * span, 300)
+            kde = kde_values(values, x_grid)
+
+            # Subplots: row 1 = boxplot, row 2 = histogram + KDE.
+            fig = make_subplots(
+                rows=2, cols=1,
+                shared_xaxes=True,
+                row_heights=[0.2, 0.8],
+                vertical_spacing=0.03,
+            )
+
+            # Row 1: horizontal box plot.
+            fig.add_trace(go.Box(
+                x=arr.tolist(),
+                orientation="h",
+                marker_color=SEVERITY_COLORS["mild"],
+                line_color="#555",
+                showlegend=False,
                 name=title,
-            ))
+                boxpoints=False,
+            ), row=1, col=1)
+
+            # Row 2: severity-coloured bar histogram.
+            fig.add_trace(go.Bar(
+                x=bin_centers.tolist(),
+                y=density.tolist(),
+                width=[bin_width] * n_bins,
+                marker=dict(
+                    color=bar_colors,
+                    line=dict(color="rgba(0,0,0,0.1)", width=0.5),
+                ),
+                name="Distribusi",
+                showlegend=False,
+                opacity=0.85,
+            ), row=2, col=1)
+
+            # Row 2: KDE overlay.
+            fig.add_trace(go.Scatter(
+                x=x_grid.tolist(),
+                y=kde.tolist(),
+                mode="lines",
+                line=dict(color="black", width=2),
+                name="KDE",
+                showlegend=False,
+            ), row=2, col=1)
+
+            # Threshold vlines (row 2 only).
             for sev, val in zip(("mild", "moderate", "severe"), thresholds):
                 fig.add_vline(
                     x=val,
-                    line=dict(color=SEVERITY_COLORS[sev], width=1.5, dash="dash"),
+                    line=dict(
+                        color=SEVERITY_COLORS[sev], width=1.5, dash="dash",
+                    ),
+                    row=2, col=1,
                     annotation_text=sev,
-                    annotation_position="top",
-                    annotation_yanchor="bottom",
-                    annotation_textangle=-90,
-                    annotation_bgcolor="rgba(255,255,255,0.85)",
+                    annotation_position="top right",
+                    annotation_font=dict(size=9),
+                    annotation_bgcolor="rgba(255,255,255,0.8)",
                     annotation_bordercolor=SEVERITY_COLORS[sev],
                     annotation_borderwidth=1,
                     annotation_borderpad=2,
-                    annotation_font=dict(size=10),
                 )
-            fig.update_layout(title=title, showlegend=False)
+
+            # Annotation n / μ / σ.
+            mean_v = float(np.mean(arr))
+            sd_v = float(np.std(arr, ddof=1)) if n >= 2 else 0.0
+            fig.add_annotation(
+                text=f"n={n}  μ={mean_v:.3f}  σ={sd_v:.3f}",
+                xref="paper", yref="paper",
+                x=0.99, y=0.99,
+                showarrow=False,
+                xanchor="right", yanchor="top",
+                bgcolor="rgba(255,255,255,0.88)",
+                bordercolor="#aaa",
+                borderwidth=1,
+                font=dict(size=9),
+            )
+
+            fig.update_layout(
+                title=title,
+                showlegend=False,
+                bargap=0.02,
+            )
             apply_chart_theme(
                 fig,
-                height=340,
+                height=400,
                 mobile_legend="hide",
                 margin=dict(l=10, r=10, t=56, b=10),
             )
@@ -268,8 +443,9 @@ def _section_distributions(sessions_rows: list[dict]) -> None:
 def _section_trajectory(snapshots_rows: list[dict]) -> None:
     st.subheader("Trajektori CDT Longitudinal")
     st.caption(
-        "Setiap garis adalah satu pengguna; sumbu X = nomor sesi. "
-        "Pilih bias di bawah dan opsional sorot satu pengguna."
+        "Setiap garis adalah satu pengguna (opacity rendah). Garis tebal hitam = "
+        "rata-rata kohort; pita abu-abu = ±1σ. Warna individu menunjukkan kuartil "
+        "intensitas akhir."
     )
     if not snapshots_rows:
         st.info("Belum ada snapshot CDT yang tersedia.")
@@ -281,49 +457,310 @@ def _section_trajectory(snapshots_rows: list[dict]) -> None:
         "Efek Disposisi (CDT DEI)": "cdt_disposition",
         "Menghindari Kerugian (CDT LAI)": "cdt_loss_aversion",
     }
-    bias_label = st.radio(
-        "Bias yang ditampilkan",
-        options=list(bias_options.keys()),
+    view_mode = st.radio(
+        "Tampilan",
+        options=list(bias_options.keys()) + ["Tampilan kohort saja"],
         horizontal=True,
         key="researcher_traj_bias",
     )
-    bias_col = bias_options[bias_label]
-
-    user_labels = sorted(df["username"].dropna().unique().tolist())
-    selected_user = st.selectbox(
-        "Sorot pengguna (opsional)",
-        options=["(tidak ada)"] + user_labels,
-        index=0,
-        key="researcher_traj_user",
-    )
+    show_individual = view_mode != "Tampilan kohort saja"
 
     fig = go.Figure()
-    for username, group in df.groupby("username"):
-        is_focus = (selected_user != "(tidak ada)" and username == selected_user)
-        opacity = 1.0 if is_focus else (
-            0.25 if selected_user != "(tidak ada)" else 0.65
+
+    if view_mode == "Tampilan kohort saja":
+        # Show cohort mean ± 1σ for all three biases on one chart.
+        all_bias_cols = {
+            "CDT OC": ("cdt_overconfidence", "#3b82f6"),
+            "CDT DEI": ("cdt_disposition", "#22c55e"),
+            "CDT LAI": ("cdt_loss_aversion", "#f59e0b"),
+        }
+        session_nums_all = sorted(df["session_number"].unique().tolist())
+        for bias_name, (bias_col, color) in all_bias_cols.items():
+            means, uppers, lowers, valid_sns = [], [], [], []
+            for sn in session_nums_all:
+                sn_vals = df[df["session_number"] == sn][bias_col].dropna().tolist()
+                if sn_vals:
+                    m = float(np.mean(sn_vals))
+                    s = float(np.std(sn_vals, ddof=1)) if len(sn_vals) >= 2 else 0.0
+                    means.append(m)
+                    uppers.append(m + s)
+                    lowers.append(m - s)
+                    valid_sns.append(sn)
+            if not valid_sns:
+                continue
+            band_x = valid_sns + valid_sns[::-1]
+            band_y = uppers + lowers[::-1]
+            fig.add_trace(go.Scatter(
+                x=band_x, y=band_y,
+                fill="toself",
+                fillcolor=_hex_to_rgba(color, 0.12),
+                line=dict(color="rgba(0,0,0,0)"),
+                showlegend=False,
+                name=f"{bias_name} ±1σ",
+            ))
+            fig.add_trace(go.Scatter(
+                x=valid_sns, y=means,
+                mode="lines+markers",
+                line=dict(color=color, width=2.5),
+                marker=dict(size=7),
+                name=bias_name,
+            ))
+    else:
+        bias_col = bias_options[view_mode]
+        user_labels = sorted(df["username"].dropna().unique().tolist())
+        selected_user = st.selectbox(
+            "Sorot pengguna (opsional)",
+            options=["(tidak ada)"] + user_labels,
+            index=0,
+            key="researcher_traj_user",
         )
-        width = 3 if is_focus else 1.5
-        fig.add_trace(go.Scatter(
-            x=group["session_number"],
-            y=group[bias_col],
-            mode="lines+markers",
-            name=str(username),
-            line=dict(width=width),
-            opacity=opacity,
-        ))
+
+        # Quartile assignment by final-session intensity.
+        final_vals: dict[str, float] = {}
+        for username, group in df.groupby("username"):
+            sorted_grp = group.sort_values("session_number")
+            col_vals = sorted_grp[bias_col].dropna()
+            if not col_vals.empty:
+                final_vals[str(username)] = float(col_vals.iloc[-1])
+
+        fv_list = sorted(final_vals.values())
+        if len(fv_list) >= 4:
+            q25 = float(np.percentile(fv_list, 25))
+            q50 = float(np.percentile(fv_list, 50))
+            q75 = float(np.percentile(fv_list, 75))
+        else:
+            q25 = q50 = q75 = float(np.median(fv_list)) if fv_list else 0.5
+
+        def _quartile_idx(v: float) -> int:
+            if v <= q25:
+                return 0
+            if v <= q50:
+                return 1
+            if v <= q75:
+                return 2
+            return 3
+
+        shown_quartiles: set[int] = set()
+        for username, group in df.groupby("username"):
+            fv = final_vals.get(str(username), 0.0)
+            qi = _quartile_idx(fv)
+            is_focus = (
+                selected_user != "(tidak ada)" and username == selected_user
+            )
+            opacity = 1.0 if is_focus else 0.18
+            width = 3 if is_focus else 1.2
+            show_legend = qi not in shown_quartiles
+            shown_quartiles.add(qi)
+            fig.add_trace(go.Scatter(
+                x=group["session_number"].tolist(),
+                y=group[bias_col].tolist(),
+                mode="lines+markers",
+                name=_Q_LABELS[qi],
+                line=dict(width=width, color=_Q_COLORS[qi]),
+                opacity=opacity,
+                legendgroup=f"q{qi}",
+                showlegend=show_legend,
+                marker=dict(size=3),
+            ))
+
+        # Cohort mean ± 1σ band.
+        session_nums = sorted(df["session_number"].unique().tolist())
+        valid_sns, means, uppers, lowers = [], [], [], []
+        for sn in session_nums:
+            sn_vals = df[df["session_number"] == sn][bias_col].dropna().tolist()
+            if sn_vals:
+                m = float(np.mean(sn_vals))
+                s = float(np.std(sn_vals, ddof=1)) if len(sn_vals) >= 2 else 0.0
+                valid_sns.append(sn)
+                means.append(m)
+                uppers.append(m + s)
+                lowers.append(m - s)
+        if valid_sns:
+            fig.add_trace(go.Scatter(
+                x=valid_sns + valid_sns[::-1],
+                y=uppers + lowers[::-1],
+                fill="toself",
+                fillcolor="rgba(100,100,100,0.13)",
+                line=dict(color="rgba(0,0,0,0)"),
+                showlegend=True,
+                name="±1σ kohort",
+                legendgroup="cohort",
+            ))
+            fig.add_trace(go.Scatter(
+                x=valid_sns,
+                y=means,
+                mode="lines+markers",
+                line=dict(color="black", width=3),
+                marker=dict(size=8, color="black"),
+                name="Rata-rata Kohort",
+                legendgroup="cohort",
+            ))
+
     fig.update_xaxes(title_text="Nomor Sesi")
     fig.update_yaxes(title_text="Intensitas (0–1)", range=[0, 1])
+    apply_chart_theme(fig, height=440, mobile_legend="top")
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _section_correlation_heatmap(sessions_rows: list[dict]) -> None:
+    st.subheader("Korelasi Inter-Bias")
+    st.caption(
+        "Matriks korelasi Pearson r antar tiga dimensi bias (DEI, OCS, LAI) "
+        "dihitung lintas semua sesi UAT.  Asterisk menunjukkan signifikansi "
+        "statistik (* p<0,05  ** p<0,01  *** p<0,001) berdasarkan uji-t "
+        "dengan aproksimasi normal."
+    )
+    if not sessions_rows:
+        st.info("Belum ada sesi tersimpan untuk divisualisasikan.")
+        return
+
+    # Build aligned (DEI, OCS, LAI) triplets — only sessions with all three.
+    dei_v, ocs_v, lai_v = [], [], []
+    for r in sessions_rows:
+        dei = abs(r["dei"]) if r["dei"] is not None else None
+        ocs = r["ocs"]
+        lai = r["lai"]
+        if all(v is not None for v in (dei, ocs, lai)):
+            dei_v.append(float(dei))  # type: ignore[arg-type]
+            ocs_v.append(float(ocs))  # type: ignore[arg-type]
+            lai_v.append(float(lai))  # type: ignore[arg-type]
+
+    n_aligned = len(dei_v)
+    if n_aligned < 2:
+        st.info("Data sesi belum cukup untuk menghitung korelasi inter-bias.")
+        return
+
+    labels = ["DEI", "OCS", "LAI"]
+    vectors = [dei_v, ocs_v, lai_v]
+    n_bias = 3
+
+    r_matrix: list[list[float]] = [[0.0] * n_bias for _ in range(n_bias)]
+    p_matrix: list[list[float | None]] = [[None] * n_bias for _ in range(n_bias)]
+    for i in range(n_bias):
+        for j in range(n_bias):
+            if i == j:
+                r_matrix[i][j] = 1.0
+                p_matrix[i][j] = 0.0
+            else:
+                r, p = pearson_with_p(vectors[i], vectors[j])
+                r_matrix[i][j] = r if r is not None else 0.0
+                p_matrix[i][j] = p
+
+    text_matrix = [
+        [
+            f"{r_matrix[i][j]:.2f}{significance_stars(p_matrix[i][j])}"
+            for j in range(n_bias)
+        ]
+        for i in range(n_bias)
+    ]
+
+    fig = go.Figure(go.Heatmap(
+        z=r_matrix,
+        x=labels,
+        y=labels,
+        text=text_matrix,
+        texttemplate="%{text}",
+        colorscale="RdBu",
+        zmid=0.0,
+        zmin=-1.0,
+        zmax=1.0,
+        colorbar=dict(title="r", thickness=14),
+        textfont=dict(size=14),
+    ))
+    fig.update_layout(title=f"Korelasi Inter-Bias (n sesi = {n_aligned})")
+    apply_chart_theme(
+        fig, height=360,
+        mobile_legend="hide",
+        margin=dict(l=40, r=40, t=60, b=40),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.caption(
+        "Korelasi tinggi antar bias menunjukkan pola kognisi yang ko-terjadi "
+        "secara konsisten, mendukung validitas konstruk model CDT multi-dimensi. "
+        "Nilai di diagonal selalu 1 (korelasi diri)."
+    )
+
+
+def _section_cohort_progression(progression_rows: list[dict]) -> None:
+    st.subheader("Progresi Kohort per Sesi")
+    st.caption(
+        "Rata-rata intensitas bias kohort per nomor sesi (1 = pertama, dst.). "
+        "Pita = 95% bootstrap CI (1 000 resampel). Temuan longitudinal utama."
+    )
+    if not progression_rows:
+        st.info("Belum ada data progres sesi.")
+        return
+
+    # Pivot: bias → {session_number: [values]}
+    bias_groups: dict[str, dict[int, list[float]]] = {
+        k: {} for k in _BIAS_META
+    }
+    for row in progression_rows:
+        bias = row["bias"]
+        if bias not in bias_groups:
+            continue
+        sn = row["session_number"]
+        bias_groups[bias][sn] = row["values"]
+
+    fig = go.Figure()
+    for bias, (display_name, color) in _BIAS_META.items():
+        groups = bias_groups[bias]
+        if not groups:
+            continue
+        ci_data = bootstrap_ci(groups, n_resamples=1000)
+        sess_nums = sorted(ci_data.keys())
+        means_b = [ci_data[s][0] for s in sess_nums]
+        lowers_b = [ci_data[s][1] for s in sess_nums]
+        uppers_b = [ci_data[s][2] for s in sess_nums]
+
+        # CI band.
+        fig.add_trace(go.Scatter(
+            x=sess_nums + sess_nums[::-1],
+            y=uppers_b + lowers_b[::-1],
+            fill="toself",
+            fillcolor=_hex_to_rgba(color, 0.15),
+            line=dict(color="rgba(0,0,0,0)"),
+            showlegend=False,
+            name=f"{display_name} CI",
+        ))
+        # Mean line.
+        fig.add_trace(go.Scatter(
+            x=sess_nums,
+            y=means_b,
+            mode="lines+markers",
+            line=dict(color=color, width=2.5),
+            marker=dict(size=8, color=color),
+            name=display_name,
+        ))
+
+    fig.update_xaxes(
+        title_text="Nomor Sesi",
+        tickmode="linear",
+        dtick=1,
+    )
+    fig.update_yaxes(title_text="Intensitas rata-rata (0–1)", range=[0, 1])
     apply_chart_theme(fig, height=420, mobile_legend="top")
     st.plotly_chart(fig, use_container_width=True)
+
+    # Show sample sizes per session.
+    n_by_sess: dict[int, int] = {}
+    for row in progression_rows:
+        sn = row["session_number"]
+        n_by_sess[sn] = max(n_by_sess.get(sn, 0), row["n"])
+    if n_by_sess:
+        n_info = "  |  ".join(
+            f"Sesi {sn}: n={n}" for sn, n in sorted(n_by_sess.items())
+        )
+        st.caption(f"Ukuran sampel: {n_info}")
 
 
 def _section_survey_vs_observed(users_rows: list[dict]) -> None:
     st.subheader("Survei vs. Hasil Observasi")
     st.caption(
         "Validasi apakah respons survei awal (prior) memprediksi intensitas "
-        "bias yang teramati melalui simulasi. Skor survei dinormalisasi 0–1 "
-        "dari rata-rata 3 item Likert (skala 1–5)."
+        "bias yang teramati melalui simulasi. Garis penuh = regresi OLS + "
+        "95% CI; garis putus-putus abu-abu = y=x (prediksi sempurna)."
     )
 
     bias_specs = [
@@ -337,7 +774,7 @@ def _section_survey_vs_observed(users_rows: list[dict]) -> None:
 
     cols = responsive_columns(3, n_mobile=1)
     for col, (label, q_keys, observed_key) in zip(cols, bias_specs):
-        xs: list[float] = []
+        xs_raw: list[float] = []
         ys: list[float] = []
         for r in users_rows:
             qs = [r.get(k) for k in q_keys]
@@ -345,26 +782,100 @@ def _section_survey_vs_observed(users_rows: list[dict]) -> None:
             if any(q is None for q in qs) or obs is None:
                 continue
             prior = (sum(qs) / 3.0 - 1.0) / 4.0  # Likert 1–5 → [0, 1]
-            xs.append(prior)
+            xs_raw.append(prior)
             ys.append(float(obs))
 
         with col:
-            if len(xs) < 2:
+            if len(xs_raw) < 2:
                 st.caption(f"Data {label} belum cukup untuk korelasi.")
                 continue
-            r_val = _pearson(xs, ys)
+
+            # Jitter ties: add ±0.005 noise to xs when ≥2 share the same value.
+            x_count = Counter(round(x, 4) for x in xs_raw)
+            rng_j = np.random.default_rng(seed=77)
+            xs_j = [
+                x + float(rng_j.uniform(-0.005, 0.005))
+                if x_count[round(x, 4)] >= 2 else x
+                for x in xs_raw
+            ]
+
+            r_val = _pearson(xs_raw, ys)
             r_text = f"r = {r_val:.3f}" if r_val is not None else "r = —"
+
             fig = go.Figure()
+
+            # Quadrant shading (x = prior, y = observed; midpoint 0.5).
+            mid = 0.5
+            quad_specs = [
+                (0, 0, mid, mid, "rgba(34,197,94,0.07)"),    # BL consistent
+                (mid, mid, 1, 1, "rgba(34,197,94,0.07)"),    # TR consistent
+                (0, mid, mid, 1, "rgba(239,68,68,0.07)"),    # TL overestimated
+                (mid, 0, 1, mid, "rgba(59,130,246,0.07)"),   # BR underestimated
+            ]
+            quad_labels = [
+                (mid / 2, mid / 2, "Konsisten\n(rendah)"),
+                (mid + mid / 2, mid + mid / 2, "Konsisten\n(tinggi)"),
+                (mid / 2, mid + mid / 2, "Survei\nlebih tinggi"),
+                (mid + mid / 2, mid / 2, "Survei\nlebih rendah"),
+            ]
+            for x0, y0, x1, y1, fc in quad_specs:
+                fig.add_shape(
+                    type="rect", x0=x0, y0=y0, x1=x1, y1=y1,
+                    fillcolor=fc, line_width=0,
+                )
+            for lx, ly, ltxt in quad_labels:
+                fig.add_annotation(
+                    x=lx, y=ly, text=ltxt.replace("\n", "<br>"),
+                    showarrow=False,
+                    font=dict(size=8, color="#888"),
+                    xanchor="center", yanchor="middle",
+                )
+
+            # Identity diagonal y = x.
+            fig.add_shape(
+                type="line", x0=0, y0=0, x1=1, y1=1,
+                line=dict(color="#aaa", width=1.5, dash="dash"),
+            )
+
+            # OLS regression + 95 % CI band.
+            x_grid = np.linspace(0.0, 1.0, 200)
+            y_fit, lower, upper = ols_confidence_band(
+                xs_raw, ys, x_grid, alpha=0.05,
+            )
             fig.add_trace(go.Scatter(
-                x=xs, y=ys,
-                mode="markers",
-                marker=dict(size=9, color=SEVERITY_COLORS["mild"], opacity=0.7),
-                name=label,
+                x=x_grid.tolist() + x_grid[::-1].tolist(),
+                y=upper.tolist() + lower[::-1].tolist(),
+                fill="toself",
+                fillcolor="rgba(59,130,246,0.12)",
+                line=dict(color="rgba(0,0,0,0)"),
+                showlegend=False,
+                name="CI 95%",
             ))
+            slope, intercept = ols_fit(xs_raw, ys)
+            fig.add_trace(go.Scatter(
+                x=x_grid.tolist(),
+                y=y_fit.tolist(),
+                mode="lines",
+                line=dict(color="#1d4ed8", width=2),
+                name=f"OLS (slope={slope:.2f})",
+            ))
+
+            # Scatter points (jittered).
+            fig.add_trace(go.Scatter(
+                x=xs_j, y=ys,
+                mode="markers",
+                marker=dict(
+                    size=9, color=SEVERITY_COLORS["mild"],
+                    opacity=0.75, line=dict(color="white", width=0.5),
+                ),
+                name=label,
+                showlegend=False,
+            ))
+
             fig.update_xaxes(title_text="Prior survei (0–1)", range=[0, 1])
             fig.update_yaxes(title_text="Intensitas teramati (0–1)", range=[0, 1])
-            fig.update_layout(title=f"{label} ({r_text}, n={len(xs)})")
-            apply_chart_theme(fig, height=320, mobile_legend="hide")
+            fig.update_layout(title=f"{label} ({r_text}, n={len(xs_raw)})")
+            apply_chart_theme(fig, height=340, mobile_legend="hide")
             st.plotly_chart(fig, use_container_width=True)
 
 
@@ -387,13 +898,13 @@ def _section_model_performance() -> None:
     macro_f1 = None
     weighted_f1 = None
     for row in cls_rows:
-        label = (row.get("kelas") or "").lower()
-        if "makro" in label:
+        label_str = (row.get("kelas") or "").lower()
+        if "makro" in label_str:
             try:
                 macro_f1 = float(row.get("f1_score") or 0.0)
             except ValueError:
                 macro_f1 = None
-        elif "tertimbang" in label:
+        elif "tertimbang" in label_str:
             try:
                 weighted_f1 = float(row.get("f1_score") or 0.0)
             except ValueError:
@@ -422,14 +933,60 @@ def _section_model_performance() -> None:
             hide_index=True,
         )
 
-    img_cols = responsive_columns(2, n_mobile=1)
-    with img_cols[0]:
-        if perf["feature_importance_path"]:
-            st.markdown("**Pentingnya Fitur (Feature Importance)**")
-            st.image(perf["feature_importance_path"], use_container_width=True)
-    with img_cols[1]:
-        if perf["decision_tree_path"]:
-            st.markdown("**Pohon Keputusan**")
+    # Feature importance: prefer live Plotly chart from JSON, fall back to PNG.
+    feature_importances = summary.get("feature_importances")
+    feature_names = summary.get("feature_names", [])
+
+    if feature_importances and feature_names and len(feature_importances) == len(feature_names):
+        st.markdown("**Pentingnya Fitur (Feature Importance)**")
+        pairs = sorted(
+            zip(feature_names, feature_importances),
+            key=lambda p: p[1],
+        )
+        fig_fi = go.Figure(go.Bar(
+            x=[p[1] for p in pairs],
+            y=[p[0] for p in pairs],
+            orientation="h",
+            marker_color="#3b82f6",
+        ))
+        fig_fi.update_layout(
+            xaxis_title="Importance",
+            margin=dict(l=10, r=10, t=10, b=10),
+        )
+        apply_chart_theme(fig_fi, height=max(300, 20 * len(pairs)))
+        st.plotly_chart(fig_fi, use_container_width=True)
+    elif perf["feature_importance_path"]:
+        st.markdown("**Pentingnya Fitur (Feature Importance)**")
+        st.image(perf["feature_importance_path"], use_container_width=True)
+
+    # Confusion matrix.
+    confusion_matrix_data = summary.get("confusion_matrix")
+    if confusion_matrix_data:
+        st.markdown("**Matriks Kebingungan**")
+        cm = confusion_matrix_data
+        classes = list(cm.keys()) if isinstance(cm, dict) else []
+        if classes:
+            z_mat = [[cm[r].get(c, 0) for c in classes] for r in classes]
+            fig_cm = go.Figure(go.Heatmap(
+                z=z_mat,
+                x=classes,
+                y=classes,
+                colorscale="Blues",
+                text=[[str(v) for v in row] for row in z_mat],
+                texttemplate="%{text}",
+            ))
+            fig_cm.update_layout(
+                xaxis_title="Prediksi",
+                yaxis_title="Aktual",
+                margin=dict(l=60, r=10, t=20, b=60),
+            )
+            apply_chart_theme(fig_cm, height=340)
+            st.plotly_chart(fig_cm, use_container_width=True)
+    else:
+        st.caption("Matriks kebingungan tidak tersedia di laporan ini.")
+
+    if perf["decision_tree_path"]:
+        with st.expander("Pohon Keputusan"):
             st.image(perf["decision_tree_path"], use_container_width=True)
 
     if perf["generated_at"]:
@@ -506,6 +1063,7 @@ def render_researcher_page() -> None:
         return
 
     render_mobile_banner()
+    _mobile_scroll_top()
     st.title("Mode Peneliti — Inspeksi UAT")
     st.caption(
         f"Akses berhasil. Waktu server: {fmt_datetime_wib(__import__('datetime').datetime.now(__import__('datetime').timezone.utc))}."
@@ -519,12 +1077,17 @@ def render_researcher_page() -> None:
         users_rows = export_all_users_csv(sess, participants_only=True)
         sessions_rows = export_all_sessions_csv(sess, participants_only=True)
         snapshots_rows = export_cdt_snapshots_csv(sess, participants_only=True)
+        progression_rows = compute_cohort_session_progression(
+            sess, participants_only=True,
+        )
 
-    tabs = st.tabs([
+    tabs = responsive_tabs([
         "Ringkasan",
         "Peserta",
         "Distribusi",
         "Trajektori",
+        "Korelasi",
+        "Progresi",
         "Survei vs. Observasi",
         "Model ML",
         "Ekspor",
@@ -539,10 +1102,14 @@ def render_researcher_page() -> None:
     with tabs[3]:
         _section_trajectory(snapshots_rows)
     with tabs[4]:
-        _section_survey_vs_observed(users_rows)
+        _section_correlation_heatmap(sessions_rows)
     with tabs[5]:
-        _section_model_performance()
+        _section_cohort_progression(progression_rows)
     with tabs[6]:
+        _section_survey_vs_observed(users_rows)
+    with tabs[7]:
+        _section_model_performance()
+    with tabs[8]:
         _section_bulk_export(users_rows, sessions_rows, snapshots_rows)
 
 

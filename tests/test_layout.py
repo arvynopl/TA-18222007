@@ -15,6 +15,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from unittest.mock import call
+
 from modules.utils import layout
 
 
@@ -127,6 +129,72 @@ class TestResponsiveColumns:
     def test_invalid_n_mobile_raises(self, stub_st):
         with pytest.raises(ValueError):
             layout.responsive_columns(3, n_mobile=0)
+
+
+# ---------------------------------------------------------------------------
+# responsive_tabs()
+# ---------------------------------------------------------------------------
+class TestResponsiveTabs:
+    def test_desktop_delegates_to_st_tabs(self, stub_st):
+        """Desktop mode returns whatever st.tabs returns."""
+        mock_tabs = [MagicMock(name=f"tab-{i}") for i in range(3)]
+        stub_st.tabs.return_value = mock_tabs
+        result = layout.responsive_tabs(["A", "B", "C"])
+        stub_st.tabs.assert_called_once_with(["A", "B", "C"])
+        assert result is mock_tabs
+
+    def test_desktop_returns_correct_length(self, stub_st):
+        stub_st.tabs.return_value = [MagicMock() for _ in range(4)]
+        result = layout.responsive_tabs(["W", "X", "Y", "Z"])
+        assert len(result) == 4
+
+    def test_mobile_returns_expanders_not_tabs(self, stub_st):
+        stub_st.session_state["cdt_viewport_pref"] = "mobile"
+        layout.responsive_tabs(["A", "B", "C"])
+        stub_st.tabs.assert_not_called()
+        assert stub_st.expander.call_count == 3
+
+    def test_mobile_returns_correct_length(self, stub_st):
+        stub_st.session_state["cdt_viewport_pref"] = "mobile"
+        result = layout.responsive_tabs(["A", "B", "C"])
+        assert len(result) == 3
+
+    def test_mobile_first_expander_expanded(self, stub_st):
+        stub_st.session_state["cdt_viewport_pref"] = "mobile"
+        call_log: list[tuple] = []
+
+        def _expander(label, expanded=False):
+            call_log.append((label, expanded))
+            cm = MagicMock()
+            cm.__enter__ = MagicMock(return_value=cm)
+            cm.__exit__ = MagicMock(return_value=False)
+            return cm
+
+        stub_st.expander.side_effect = _expander
+        layout.responsive_tabs(["Alpha", "Beta", "Gamma"])
+        assert call_log[0] == ("Alpha", True)
+        assert call_log[1] == ("Beta", False)
+        assert call_log[2] == ("Gamma", False)
+
+    def test_mobile_single_label_expanded(self, stub_st):
+        stub_st.session_state["cdt_viewport_pref"] = "mobile"
+        call_log: list[tuple] = []
+
+        def _expander(label, expanded=False):
+            call_log.append((label, expanded))
+            cm = MagicMock()
+            cm.__enter__ = MagicMock(return_value=cm)
+            cm.__exit__ = MagicMock(return_value=False)
+            return cm
+
+        stub_st.expander.side_effect = _expander
+        layout.responsive_tabs(["Solo"])
+        assert call_log == [("Solo", True)]
+
+    def test_empty_labels_returns_empty(self, stub_st):
+        stub_st.tabs.return_value = []
+        result = layout.responsive_tabs([])
+        assert result == []
 
 
 # ---------------------------------------------------------------------------
