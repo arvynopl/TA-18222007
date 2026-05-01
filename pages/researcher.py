@@ -256,8 +256,12 @@ def _section_distributions(sessions_rows: list[dict]) -> None:
                     annotation_font=dict(size=10),
                 )
             fig.update_layout(title=title, showlegend=False)
-            apply_chart_theme(fig, height=340)
-            fig.update_layout(margin=dict(t=56))
+            apply_chart_theme(
+                fig,
+                height=340,
+                mobile_legend="hide",
+                margin=dict(l=10, r=10, t=56, b=10),
+            )
             st.plotly_chart(fig, use_container_width=True)
 
 
@@ -310,7 +314,7 @@ def _section_trajectory(snapshots_rows: list[dict]) -> None:
         ))
     fig.update_xaxes(title_text="Nomor Sesi")
     fig.update_yaxes(title_text="Intensitas (0–1)", range=[0, 1])
-    apply_chart_theme(fig, height=420)
+    apply_chart_theme(fig, height=420, mobile_legend="top")
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -360,7 +364,7 @@ def _section_survey_vs_observed(users_rows: list[dict]) -> None:
             fig.update_xaxes(title_text="Prior survei (0–1)", range=[0, 1])
             fig.update_yaxes(title_text="Intensitas teramati (0–1)", range=[0, 1])
             fig.update_layout(title=f"{label} ({r_text}, n={len(xs)})")
-            apply_chart_theme(fig, height=320)
+            apply_chart_theme(fig, height=320, mobile_legend="hide")
             st.plotly_chart(fig, use_container_width=True)
 
 
