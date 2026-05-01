@@ -32,7 +32,7 @@ from modules.auth import (
 )
 from modules.feedback.renderer import render_feedback_page
 from modules.simulation.ui import render_simulation_page
-from modules.utils.layout import render_mobile_toggle, responsive_columns
+from modules.utils.layout import render_viewport_override, responsive_columns
 from modules.utils.log_config import configure_logging
 from modules.utils.ui_helpers import (
     NAV_ITEMS, fmt_datetime_wib, inject_custom_css,
@@ -175,7 +175,7 @@ def _render_header() -> None:
                 st.rerun()
 
     render_mobile_banner()
-    render_mobile_toggle()
+    render_viewport_override()
 
     clicked = render_top_nav(current, enabled_map)
     if clicked != current:
