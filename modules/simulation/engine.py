@@ -8,6 +8,7 @@ table and exposes one day at a time to the simulation UI.
 from __future__ import annotations
 
 import random
+from datetime import date
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -23,9 +24,19 @@ class SimulationEngine:
         user_id:    ID of the participating user.
         session_id: UUID string identifying this session.
         db_session: Active SQLAlchemy session for reading market data.
+        start_date: Optional fixed start date for the window. When provided
+                    (e.g. when resuming an in-progress session) the engine
+                    reconstructs the same window instead of picking a random
+                    one. The date must exist in MarketSnapshot.
     """
 
-    def __init__(self, user_id: int, session_id: str, db_session: Session) -> None:
+    def __init__(
+        self,
+        user_id: int,
+        session_id: str,
+        db_session: Session,
+        start_date: Optional[date] = None,
+    ) -> None:
         self.user_id = user_id
         self.session_id = session_id
         self._db = db_session
@@ -37,18 +48,22 @@ class SimulationEngine:
         self._start_date = None
         self._end_date = None
 
-        self._select_window()
+        self._select_window(fixed_start_date=start_date)
 
     # ------------------------------------------------------------------
     # Window selection
     # ------------------------------------------------------------------
 
-    def _select_window(self) -> None:
-        """Randomly pick a contiguous ROUNDS_PER_SESSION-day trading window.
+    def _select_window(self, fixed_start_date: Optional[date] = None) -> None:
+        """Pick a contiguous ROUNDS_PER_SESSION-day trading window.
+
+        When ``fixed_start_date`` is supplied (resume path) the window starts
+        at that exact trading date; otherwise a random start index is chosen.
 
         Strategy:
             1. Fetch all distinct trading dates shared across all stocks.
-            2. Pick a random start index in [0, len(dates) - ROUNDS_PER_SESSION].
+            2. Pick a start index — fixed if provided, else random in
+               [0, len(dates) - ROUNDS_PER_SESSION].
             3. Load the MarketSnapshot rows for those dates for every stock.
         """
         # All distinct dates available in the DB, sorted ascending
@@ -67,7 +82,22 @@ class SimulationEngine:
             )
 
         max_start = len(all_dates) - ROUNDS_PER_SESSION
-        start_idx = random.randint(0, max_start)
+        if fixed_start_date is not None:
+            try:
+                start_idx = all_dates.index(fixed_start_date)
+            except ValueError as exc:
+                raise RuntimeError(
+                    f"Cannot resume session: start_date {fixed_start_date} "
+                    "not found in MarketSnapshot."
+                ) from exc
+            if start_idx > max_start:
+                raise RuntimeError(
+                    f"Cannot resume session: start_date {fixed_start_date} "
+                    f"leaves fewer than {ROUNDS_PER_SESSION} trading days "
+                    "ahead of it."
+                )
+        else:
+            start_idx = random.randint(0, max_start)
         window_dates = all_dates[start_idx : start_idx + ROUNDS_PER_SESSION]
 
         self._start_date = window_dates[0]
