@@ -182,31 +182,110 @@ def format_severity_badge(severity: str) -> str:
 # Plotly chart theme
 # ---------------------------------------------------------------------------
 
-def apply_chart_theme(fig: go.Figure, height: int = 400) -> go.Figure:
-    """Apply the consistent v6 light-theme styling to a Plotly figure."""
+# Legend placement aliases for apply_chart_theme(mobile_legend=...).
+_MOBILE_LEGEND_TOP = "top"
+_MOBILE_LEGEND_BOTTOM = "bottom"
+_MOBILE_LEGEND_HIDE = "hide"
+_MOBILE_LEGEND_POLAR = "polar"
+
+
+def apply_chart_theme(
+    fig: go.Figure,
+    height: int = 400,
+    *,
+    mobile_height: int | None = None,
+    mobile_legend: str = "top",
+    margin: dict | None = None,
+) -> go.Figure:
+    """Apply the v6 light-theme styling, with viewport-aware sizing on mobile.
+
+    On mobile (``is_mobile()`` is True) the chart height drops to
+    ``mobile_height or max(int(height * 0.7), 260)`` so a single chart no
+    longer dominates the fold of a 380×800 viewport. The legend is moved to
+    a top strip (or hidden) to stop it from colliding with x-axis labels,
+    and axis titles shrink one font step.
+
+    Args:
+        fig: Plotly figure to mutate in place.
+        height: desktop height in px.
+        mobile_height: explicit mobile height. ``None`` falls back to
+            ``max(int(height * 0.7), 260)``.
+        mobile_legend: legend treatment on mobile — ``"top"`` (stacked above,
+            extra top margin), ``"bottom"`` (keep desktop placement),
+            ``"hide"`` (legend off entirely), ``"polar"`` (below a polar plot
+            footprint at ``y=-0.45``).
+        margin: explicit margin override that wins over the theme defaults.
+    """
+    from modules.utils.layout import is_mobile
+
+    mobile = is_mobile()
+
+    if mobile:
+        eff_height = (
+            mobile_height if mobile_height is not None else max(int(height * 0.7), 260)
+        )
+    else:
+        eff_height = height
+
+    desktop_legend = dict(
+        orientation="h", yanchor="bottom", y=-0.2,
+        xanchor="center", x=0.5,
+        font=dict(size=11, color=CHART_TEXT),
+    )
+    desktop_margin = dict(l=10, r=10, t=40, b=10)
+
+    if mobile and mobile_legend == _MOBILE_LEGEND_TOP:
+        legend = dict(
+            orientation="h", yanchor="bottom", y=1.02,
+            xanchor="left", x=0,
+            font=dict(size=11, color=CHART_TEXT),
+        )
+        default_margin = dict(l=10, r=10, t=70, b=10)
+    elif mobile and mobile_legend == _MOBILE_LEGEND_HIDE:
+        legend = None
+        default_margin = dict(l=10, r=10, t=40, b=10)
+    elif mobile and mobile_legend == _MOBILE_LEGEND_POLAR:
+        legend = dict(
+            orientation="h", yanchor="bottom", y=-0.45,
+            xanchor="center", x=0.5,
+            font=dict(size=10, color=CHART_TEXT),
+        )
+        default_margin = dict(l=20, r=20, t=50, b=80)
+    else:
+        legend = desktop_legend
+        default_margin = desktop_margin
+
+    eff_margin = margin if margin is not None else default_margin
+
     fig.update_layout(
-        height=height,
+        height=eff_height,
         plot_bgcolor=CHART_BG,
         paper_bgcolor=CHART_BG,
         font=dict(color=CHART_TEXT, size=12),
-        margin=dict(l=10, r=10, t=40, b=10),
-        xaxis=dict(gridcolor=CHART_GRID, zeroline=False),
-        yaxis=dict(gridcolor=CHART_GRID, zeroline=False),
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=-0.2,
-            xanchor="center",
-            x=0.5,
-            font=dict(size=11, color=CHART_TEXT),
-        ),
+        margin=eff_margin,
         xaxis_rangeslider_visible=False,
     )
+    if legend is not None:
+        fig.update_layout(legend=legend)
+    elif mobile and mobile_legend == _MOBILE_LEGEND_HIDE:
+        fig.update_layout(showlegend=False)
+
+    # update_xaxes/update_yaxes are no-ops on figures without those axes
+    # (e.g. pure polar / indicator), so this is safe to call universally.
+    fig.update_xaxes(gridcolor=CHART_GRID, zeroline=False, automargin=True)
+    fig.update_yaxes(gridcolor=CHART_GRID, zeroline=False, automargin=True)
+    if mobile:
+        fig.update_xaxes(title_font_size=11)
+        fig.update_yaxes(title_font_size=11)
+
     return fig
 
 
 def build_severity_gauge(value: float, max_val: float, label: str, severity: str) -> go.Figure:
     """Build a semicircular gauge chart for a single bias metric (light theme)."""
+    from modules.utils.layout import is_mobile
+
+    mobile = is_mobile()
     color = SEVERITY_COLORS.get(severity, COLOR_NEUTRAL)
     fig = go.Figure(go.Indicator(
         mode="gauge+number",
@@ -227,8 +306,11 @@ def build_severity_gauge(value: float, max_val: float, label: str, severity: str
         ),
     ))
     fig.update_layout(
-        height=200,
-        margin=dict(l=20, r=20, t=50, b=10),
+        height=160 if mobile else 200,
+        margin=(
+            dict(l=12, r=12, t=40, b=8) if mobile
+            else dict(l=20, r=20, t=50, b=10)
+        ),
         paper_bgcolor=CHART_BG,
         font=dict(color=CHART_TEXT),
     )
@@ -237,6 +319,9 @@ def build_severity_gauge(value: float, max_val: float, label: str, severity: str
 
 def build_radar_chart(values: dict, title: str = "Profil Bias") -> go.Figure:
     """Build a radar chart for the CDT bias intensity vector (light theme)."""
+    from modules.utils.layout import is_mobile
+
+    mobile = is_mobile()
     categories = [
         BIAS_NAMES["overconfidence"],
         BIAS_NAMES["disposition_effect"],
@@ -268,15 +353,18 @@ def build_radar_chart(values: dict, title: str = "Profil Bias") -> go.Figure:
                 tickfont=dict(size=10, color=CHART_TEXT),
             ),
             angularaxis=dict(
-                tickfont=dict(size=12, color=CHART_TITLE),
+                tickfont=dict(size=11 if mobile else 12, color=CHART_TITLE),
                 gridcolor=CHART_GRID,
             ),
             bgcolor=CHART_BG,
         ),
         showlegend=False,
-        title=dict(text=title, font=dict(size=16, color=CHART_TITLE)),
-        height=350,
-        margin=dict(l=60, r=60, t=60, b=30),
+        title=dict(text=title, font=dict(size=15 if mobile else 16, color=CHART_TITLE)),
+        height=300 if mobile else 350,
+        margin=(
+            dict(l=40, r=40, t=50, b=20) if mobile
+            else dict(l=60, r=60, t=60, b=30)
+        ),
         paper_bgcolor=CHART_BG,
     )
     return fig
@@ -317,6 +405,9 @@ def build_dual_radar_chart(
     Both ``current_scores`` and ``avg_scores`` are dicts keyed ``dei/ocs/lai``
     in [0, 1].
     """
+    from modules.utils.layout import is_mobile
+
+    mobile = is_mobile()
     categories = [
         "Efek Disposisi (DEI)",
         "Bias Keyakinan Berlebih (OCS)",
@@ -414,7 +505,7 @@ def build_dual_radar_chart(
                 tickfont=dict(size=10, color=CHART_TEXT),
             ),
             angularaxis=dict(
-                tickfont=dict(size=12, color=CHART_TITLE),
+                tickfont=dict(size=11 if mobile else 12, color=CHART_TITLE),
                 gridcolor=CHART_GRID,
             ),
             bgcolor=CHART_BG,
@@ -423,17 +514,20 @@ def build_dual_radar_chart(
         legend=dict(
             orientation="h",
             yanchor="bottom",
-            y=-0.32,
+            y=-0.45 if mobile else -0.32,
             xanchor="center",
             x=0.5,
-            font=dict(size=11, color=CHART_TEXT),
+            font=dict(size=10 if mobile else 11, color=CHART_TEXT),
         ),
         title=dict(
             text="Radar Bias: Sesi Ini, Rata-rata, dan Titik Waspada",
-            font=dict(size=16, color=CHART_TITLE),
+            font=dict(size=14 if mobile else 16, color=CHART_TITLE),
         ),
-        height=440,
-        margin=dict(l=60, r=60, t=70, b=90),
+        height=360 if mobile else 440,
+        margin=(
+            dict(l=30, r=30, t=60, b=110) if mobile
+            else dict(l=60, r=60, t=70, b=90)
+        ),
         paper_bgcolor=CHART_BG,
     )
     return fig
@@ -618,6 +712,18 @@ def inject_custom_css() -> None:
     }
 
     /* ---------------------------------------------------------------- */
+    /* Narrow mobile (≤480px) — heading scale                           */
+    /* Streamlit's default h1–h4 sizes burn vertical fold on phones.    */
+    /* Scale them down so the page header doesn't dominate the viewport. */
+    /* ---------------------------------------------------------------- */
+    @media (max-width: 480px) {
+        h1, .stMarkdown h1 { font-size: 22px !important; line-height: 1.25; }
+        h2, .stMarkdown h2 { font-size: 19px !important; line-height: 1.3; }
+        h3, .stMarkdown h3 { font-size: 17px !important; line-height: 1.3; }
+        h4, .stMarkdown h4 { font-size: 15px !important; line-height: 1.35; }
+    }
+
+    /* ---------------------------------------------------------------- */
     /* Narrow mobile (≤380px) — iPhone SE class                         */
     /* ---------------------------------------------------------------- */
     @media (max-width: 380px) {
@@ -720,7 +826,8 @@ def render_coach_mark_onboarding() -> bool:
     </div>
     """, unsafe_allow_html=True)
 
-    _, btn_col = st.columns([2, 1])
+    from modules.utils.layout import responsive_columns
+    _, btn_col = responsive_columns([2, 1], n_mobile=1)
     with btn_col:
         if st.button(
             current["btn"],

@@ -147,17 +147,24 @@ def _build_compact_line_chart(
                 xanchor="left",
             )
 
-    apply_chart_theme(fig, height=280)
-    fig.update_layout(
-        legend=dict(
-            x=0,
-            y=1.18,
-            orientation="h",
-            bgcolor="rgba(0,0,0,0)",
-            font=dict(size=10),
-        ),
-        margin=dict(l=8, r=8, t=24, b=8),
+    apply_chart_theme(
+        fig,
+        height=280,
+        mobile_height=240,
+        mobile_legend="top",
+        margin=dict(l=8, r=8, t=44, b=8),
     )
+    # Compact chart is the mobile-friendly path; we always want a top-stacked
+    # legend so it doesn't collide with the date ticks. apply_chart_theme has
+    # already set this on mobile; for desktop we still want compact placement.
+    if not is_mobile():
+        fig.update_layout(
+            legend=dict(
+                x=0, y=1.12, orientation="h",
+                bgcolor="rgba(0,0,0,0)",
+                font=dict(size=10),
+            ),
+        )
     fig.update_xaxes(type="category", gridcolor="rgba(0,0,0,0.08)")
     fig.update_yaxes(title_text="Harga (Rp)", gridcolor="rgba(0,0,0,0.08)")
     return fig
@@ -338,11 +345,17 @@ def _build_full_chart(
                 xanchor="left",
             )
 
-    apply_chart_theme(fig, height=420)
+    apply_chart_theme(
+        fig,
+        height=420,
+        mobile_height=320,
+        mobile_legend="top",
+        margin=dict(l=10, r=10, t=58, b=10),
+    )
     fig.update_layout(
         legend=dict(
             x=0,
-            y=1.18,
+            y=1.12,
             orientation="h",
             bgcolor="rgba(0,0,0,0)",
             font=dict(size=10),
@@ -1146,7 +1159,13 @@ def render_simulation_page() -> None:
             ),
         )
         fig = _build_full_chart(sid, pre_hist, win_data, current_round, compact=compact)
-        st.plotly_chart(fig, use_container_width=True, key=f"chart_{sid}_{current_round}")
+        chart_config = {"displayModeBar": False} if is_mobile() else None
+        st.plotly_chart(
+            fig,
+            use_container_width=True,
+            key=f"chart_{sid}_{current_round}",
+            config=chart_config,
+        )
 
         # Current position info
         held = portfolio.holdings.get(sid)

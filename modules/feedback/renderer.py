@@ -483,11 +483,13 @@ def render_interaction_profile(user_id: int, snapshots_data: list[dict]) -> None
         fig.update_layout(
             xaxis_title="|Efek Disposisi| (DEI)",
             yaxis_title="Keyakinan Berlebih (OCS)",
+        )
+        from modules.utils.ui_helpers import apply_chart_theme
+        apply_chart_theme(
+            fig,
             height=400,
+            mobile_legend="hide",
             margin=dict(l=10, r=10, t=30, b=10),
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            font=dict(color="#4A4A4A", size=12),
         )
         st.plotly_chart(fig, use_container_width=True)
         st.caption(
@@ -674,12 +676,14 @@ def render_anomaly_detection_profile(user_id: int, session_count: int) -> None:
     )
     fig.update_layout(
         yaxis_title="Skor Anomali (lebih negatif = lebih menyimpang)",
-        height=300,
-        margin=dict(l=10, r=10, t=30, b=10),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(color="#4A4A4A", size=12),
         showlegend=False,
+    )
+    from modules.utils.ui_helpers import apply_chart_theme
+    apply_chart_theme(
+        fig,
+        height=300,
+        mobile_legend="hide",
+        margin=dict(l=10, r=10, t=30, b=10),
     )
     st.plotly_chart(fig, use_container_width=True)
     st.caption(
@@ -1089,7 +1093,7 @@ def render_feedback_page(user_id: int, session_id: str) -> None:
 
     # --- Session navigation CTAs ---
     st.divider()
-    col_new, col_profile = st.columns(2)
+    col_new, col_profile = responsive_columns(2, n_mobile=1)
     with col_new:
         if st.button("🔄 Mulai Sesi Baru", use_container_width=True, type="primary"):
             st.session_state["current_page"] = "Simulasi Investasi"

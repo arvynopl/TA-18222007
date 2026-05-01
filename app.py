@@ -756,7 +756,7 @@ def _page_profil() -> None:
         st.caption(f"Terakhir diperbarui: {fmt_datetime_wib(profile_data['last_updated_at'])}")
 
     st.divider()
-    col_cta1, col_cta2 = st.columns(2)
+    col_cta1, col_cta2 = responsive_columns(2, n_mobile=1)
     with col_cta1:
         if st.button("Lihat Umpan Balik Terakhir →", use_container_width=True):
             st.session_state["current_page"] = "Hasil Analisis & Umpan Balik"
