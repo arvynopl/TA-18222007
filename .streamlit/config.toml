@@ -6,6 +6,18 @@ secondaryBackgroundColor = "#F5F7FA"
 textColor = "#1C1E21"
 font = "sans serif"
 
+# Streamlit >=1.54 reads sidebar widget colors from this section. Defining
+# explicit values prevents the frontend from logging "Invalid color passed
+# for skeletonBackgroundColor / widgetBackgroundColor / widgetBorderColor"
+# when these fields would otherwise be sent as empty strings.
+[theme.sidebar]
+backgroundColor = "#F5F7FA"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#1C1E21"
+skeletonBackgroundColor = "#E5E7EB"
+widgetBackgroundColor = "#FFFFFF"
+widgetBorderColor = "#D1D5DB"
+
 [server]
 headless = true
 enableCORS = false

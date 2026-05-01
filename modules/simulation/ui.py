@@ -359,34 +359,121 @@ def _build_full_chart(
 # Session initialisation
 # ---------------------------------------------------------------------------
 
+def _replay_actions_into_portfolio(
+    sess,
+    session_id: str,
+    portfolio: Portfolio,
+    window: dict,
+) -> int:
+    """Replay logged UserAction rows for a session back into a fresh Portfolio.
+
+    Returns the next un-played round number (1..ROUNDS_PER_SESSION+1). The
+    portfolio is mutated in place with the same buy/sell sequence the user
+    originally executed, using the same MarketSnapshot prices.
+    """
+    from database.models import UserAction
+
+    # snapshot_id → close price lookup, built from the in-memory window so we
+    # don't need a second DB round-trip per action.
+    snap_price = {
+        snap["id"]: snap["close"]
+        for snaps in window.values()
+        for snap in snaps
+    }
+
+    actions = (
+        sess.query(UserAction)
+        .filter_by(session_id=session_id)
+        .order_by(UserAction.scenario_round.asc(), UserAction.id.asc())
+        .all()
+    )
+    if not actions:
+        return 1
+
+    last_round = 0
+    for action in actions:
+        price = snap_price.get(action.snapshot_id)
+        if price is None:
+            # Snapshot is outside the resumed window — skip rather than crash.
+            continue
+        try:
+            if action.action_type == "buy" and action.quantity > 0:
+                portfolio.buy(action.stock_id, action.quantity, price, action.scenario_round)
+            elif action.action_type == "sell" and action.quantity > 0:
+                portfolio.sell(action.stock_id, action.quantity, price, action.scenario_round)
+            # "hold" → no portfolio mutation
+        except ValueError:
+            # If a replay step is invalid (shouldn't happen since these came
+            # from a successful execute), skip and keep going.
+            _pipeline_logger.exception(
+                "session=%s replay buy/sell rejected at round %s for %s",
+                session_id, action.scenario_round, action.stock_id,
+            )
+        last_round = max(last_round, action.scenario_round)
+
+    return last_round + 1
+
+
 def init_simulation_session() -> None:
-    """Initialise Streamlit session state for a new simulation session."""
+    """Initialise Streamlit session state for a simulation session.
+
+    On first entry per browser tab, this either:
+    - Resumes the most recent ``in_progress`` SessionSummary for the logged-in
+      user (rebuilding the same window and replaying logged actions), or
+    - Creates a fresh session — the SessionSummary row is inserted *after*
+      the engine picks a window so window_start_date / window_end_date are
+      persisted up front and a future refresh can resume from them.
+    """
+    from database.models import SessionSummary
+    from datetime import datetime, timezone
+
+    user_id = st.session_state.get("user_id")
+
+    # ------------------------------------------------------------------
+    # Step 1: pick session_id (resume existing or generate new) and decide
+    # whether the engine should rebuild a known window.
+    # ------------------------------------------------------------------
+    resume_start_date = None
     if "sim_session_id" not in st.session_state:
-        st.session_state["sim_session_id"] = str(uuid.uuid4())
-        # Persist session start
-        from database.models import SessionSummary
-        from datetime import datetime, timezone
-        user_id = st.session_state.get("user_id")
+        existing_session_id: str | None = None
         if user_id:
             with get_session() as sess:
-                sess.add(SessionSummary(
-                    user_id=user_id,
-                    session_id=st.session_state["sim_session_id"],
-                    started_at=datetime.now(timezone.utc),
-                    status="in_progress",
-                ))
+                existing = (
+                    sess.query(SessionSummary)
+                    .filter_by(user_id=user_id, status="in_progress")
+                    .order_by(SessionSummary.started_at.desc())
+                    .first()
+                )
+                if existing and existing.window_start_date:
+                    existing_session_id = existing.session_id
+                    resume_start_date = existing.window_start_date
+                elif existing:
+                    # Orphaned row from a crash before the engine finished
+                    # initialising — drop it so a clean session can start.
+                    existing.status = "abandoned"
+                    existing.completed_at = datetime.now(timezone.utc)
+
+        if existing_session_id:
+            st.session_state["sim_session_id"] = existing_session_id
+        else:
+            st.session_state["sim_session_id"] = str(uuid.uuid4())
 
     if "sim_portfolio" not in st.session_state:
         st.session_state["sim_portfolio"] = Portfolio(INITIAL_CAPITAL)
 
+    # ------------------------------------------------------------------
+    # Step 2: build engine + window. For resumes, also replay logged
+    # actions into the Portfolio and advance sim_current_round.
+    # ------------------------------------------------------------------
     if "sim_engine" not in st.session_state:
-        user_id = st.session_state.get("user_id")
         session_id = st.session_state["sim_session_id"]
         try:
             with get_session() as sess:
-                engine = SimulationEngine(user_id, session_id, sess)
+                engine = SimulationEngine(
+                    user_id, session_id, sess, start_date=resume_start_date
+                )
                 # Serialize window data (snapshots) to plain dicts
-                st.session_state["sim_window"] = {
+                window = {
                     sid: [
                         {
                             "id": snap.id,
@@ -407,21 +494,52 @@ def init_simulation_session() -> None:
                     ]
                     for sid, snaps in engine._window.items()
                 }
+                st.session_state["sim_window"] = window
                 st.session_state["sim_stock_ids"] = engine.stock_ids
-                # Store window date range for SessionSummary
+                window_start = window_end = None
                 if engine.stock_ids:
                     first_stock = engine.stock_ids[0]
-                    st.session_state["sim_window_start"] = engine._window[first_stock][0].date
-                    st.session_state["sim_window_end"] = engine._window[first_stock][-1].date
+                    window_start = engine._window[first_stock][0].date
+                    window_end = engine._window[first_stock][-1].date
+                    st.session_state["sim_window_start"] = window_start
+                    st.session_state["sim_window_end"] = window_end
                 # Fetch pre-window history while session is still active
                 pre_history = engine.get_pre_window_history()
                 st.session_state["sim_pre_history"] = pre_history
+
+                # New session → insert SessionSummary now that we have window
+                # dates. This is what lets a future refresh resume.
+                if resume_start_date is None and user_id:
+                    sess.add(SessionSummary(
+                        user_id=user_id,
+                        session_id=session_id,
+                        started_at=datetime.now(timezone.utc),
+                        status="in_progress",
+                        window_start_date=window_start,
+                        window_end_date=window_end,
+                    ))
+                    next_round = 1
+                else:
+                    # Resume path: replay UserActions to rebuild Portfolio
+                    # and find the next round to play.
+                    next_round = _replay_actions_into_portfolio(
+                        sess,
+                        session_id,
+                        st.session_state["sim_portfolio"],
+                        window,
+                    )
+
+            st.session_state["sim_current_round"] = next_round
             st.session_state["sim_engine"] = True  # prevents re-init on every rerun
+
+            # If the resumed session had already completed all rounds (e.g. a
+            # crash during the post-session pipeline left status="in_progress"),
+            # mark it complete so the standard finished-state UI renders.
+            if next_round > ROUNDS_PER_SESSION:
+                st.session_state["sim_complete"] = True
         except Exception:
-            # Engine failed to initialise — mark the orphaned SessionSummary as
-            # abandoned so it doesn't stay "in_progress" forever.
-            from database.models import SessionSummary
-            from datetime import datetime, timezone
+            # Engine failed to initialise — mark any orphaned SessionSummary
+            # as abandoned so it doesn't stay "in_progress" forever.
             _pipeline_logger.exception(
                 "user=%s session=%s engine init failed; marking session abandoned",
                 user_id, session_id,
@@ -597,54 +715,72 @@ def _execute_round(
     )
 
     errors: list[str] = []
-    with get_session() as sess:
-        for sid in stock_ids:
-            snap = window[sid][current_round - 1]
-            price = snap["close"]
+    try:
+        with get_session() as sess:
+            for sid in stock_ids:
+                snap = window[sid][current_round - 1]
+                price = snap["close"]
 
-            if sid in pending_orders:
-                order = pending_orders[sid]
-                atype_bahasa = order["action_type"]
-                qty = order["quantity"]
-                atype_en = {"Beli": "buy", "Jual": "sell"}.get(atype_bahasa, "hold")
+                if sid in pending_orders:
+                    order = pending_orders[sid]
+                    atype_bahasa = order["action_type"]
+                    qty = order["quantity"]
+                    atype_en = {"Beli": "buy", "Jual": "sell"}.get(atype_bahasa, "hold")
 
-                try:
-                    if atype_en == "buy" and qty > 0:
-                        portfolio.buy(sid, qty, price, current_round)
-                    elif atype_en == "sell" and qty > 0:
-                        portfolio.sell(sid, qty, price, current_round)
-                    else:
+                    try:
+                        if atype_en == "buy" and qty > 0:
+                            portfolio.buy(sid, qty, price, current_round)
+                        elif atype_en == "sell" and qty > 0:
+                            portfolio.sell(sid, qty, price, current_round)
+                        else:
+                            atype_en = "hold"
+                            qty = 0
+                    except ValueError as e:
+                        errors.append(str(e))
                         atype_en = "hold"
                         qty = 0
-                except ValueError as e:
-                    errors.append(str(e))
+                else:
                     atype_en = "hold"
                     qty = 0
-            else:
-                atype_en = "hold"
-                qty = 0
 
-            actual_value = qty * price if qty > 0 else 0.0
-            log_action(
-                session=sess,
-                user_id=user_id,
-                session_id=session_id,
-                scenario_round=current_round,
-                stock_id=sid,
-                snapshot_id=snap["id"],
-                action_type=atype_en,
-                quantity=qty,
-                action_value=actual_value,
-                response_time_ms=response_time_ms,
-            )
+                actual_value = qty * price if qty > 0 else 0.0
+                log_action(
+                    session=sess,
+                    user_id=user_id,
+                    session_id=session_id,
+                    scenario_round=current_round,
+                    stock_id=sid,
+                    snapshot_id=snap["id"],
+                    action_type=atype_en,
+                    quantity=qty,
+                    action_value=actual_value,
+                    response_time_ms=response_time_ms,
+                )
+    except Exception:
+        # Persisting the round failed mid-way; the SQLAlchemy session has
+        # rolled back. Surface the error and bail out WITHOUT touching
+        # sim_current_round / sim_submitted_round so the user can retry the
+        # same round instead of getting stranded.
+        _pipeline_logger.exception(
+            "user=%s session=%s round=%s execute failed",
+            user_id, session_id, current_round,
+        )
+        st.error(
+            "Terjadi kesalahan saat menyimpan keputusan putaran ini. "
+            "Silakan coba lagi."
+        )
+        return
 
     if errors:
         for err in errors:
             st.error(err)
 
-    # Advance round
+    # Advance round and mark this one submitted ONLY after a successful save —
+    # this pair is what the render-side guard relies on to decide whether to
+    # show the execute button.
     next_round = current_round + 1
     st.session_state["sim_current_round"] = next_round
+    st.session_state["sim_submitted_round"] = current_round
     st.session_state["sim_round_start_time"] = time.time()
     st.session_state["sim_pending_orders"] = {}
 
@@ -1113,7 +1249,10 @@ def render_simulation_page() -> None:
     # -----------------------------------------------------------------------
     st.divider()
 
-    # Guard against double-submission
+    # Guard against double-submission. sim_submitted_round is only set after
+    # _execute_round successfully persists the round and advances
+    # sim_current_round, so this branch can no longer trap the user when an
+    # execute attempt errors out mid-way.
     if st.session_state.get("sim_submitted_round") == current_round:
         st.info("Putaran ini sudah dieksekusi. Menunggu putaran berikutnya…")
         return
@@ -1123,8 +1262,15 @@ def render_simulation_page() -> None:
         if current_round < ROUNDS_PER_SESSION
         else "Selesaikan Sesi (Putaran Terakhir)"
     )
-    if st.button(f"✅ {execute_label}", use_container_width=True, type="primary"):
-        st.session_state["sim_submitted_round"] = current_round
+    # Per-round key prevents a queued double-click from being delivered to the
+    # next round's button (Streamlit otherwise treats the widget at the same
+    # position as a continuation of the previous click).
+    if st.button(
+        f"✅ {execute_label}",
+        use_container_width=True,
+        type="primary",
+        key=f"sim_exec_btn_{session_id}_{current_round}",
+    ):
         _execute_round(
             user_id, session_id, portfolio,
             current_round, window, stock_ids, pending,
