@@ -387,6 +387,81 @@ def export_cdt_snapshots_csv(
     return rows
 
 
+def compute_cohort_session_progression(
+    db_session: Session,
+    *,
+    participants_only: bool = True,
+) -> list[dict]:
+    """Cohort-level bias means aligned by within-user session number.
+
+    Each user's sessions are numbered 1, 2, 3, … in chronological order
+    (earliest computed_at = session 1).  Values are then averaged across all
+    users who reached that session number, giving a cohort-level progression.
+
+    Returns a list sorted by (session_number, bias).  Each dict has:
+        session_number : int   — 1-indexed within each user's history
+        bias           : str   — "dei", "ocs", or "lai"
+        mean           : float
+        sd             : float
+        n              : int   — number of users contributing to this point
+        values         : list[float] — raw values; useful for bootstrap CI
+
+    Args:
+        participants_only: Restrict to qualified UAT participants (default True).
+    """
+    qualified: Optional[set[int]] = (
+        _participant_user_ids(db_session) if participants_only else None
+    )
+    metrics_q = (
+        db_session.query(BiasMetric)
+        .order_by(BiasMetric.user_id, BiasMetric.computed_at)
+    )
+    if qualified is not None:
+        metrics_q = metrics_q.filter(BiasMetric.user_id.in_(qualified))
+    metrics = metrics_q.all()
+
+    # Group metrics per user (already ordered by computed_at within each user
+    # because the query sorts by user_id then computed_at).
+    per_user: dict[int, list[BiasMetric]] = {}
+    for m in metrics:
+        per_user.setdefault(m.user_id, []).append(m)
+
+    dei_by_sess: dict[int, list[float]] = {}
+    ocs_by_sess: dict[int, list[float]] = {}
+    lai_by_sess: dict[int, list[float]] = {}
+
+    for uid, user_metrics in per_user.items():
+        for idx, m in enumerate(user_metrics, start=1):
+            if m.disposition_dei is not None:
+                dei_by_sess.setdefault(idx, []).append(abs(m.disposition_dei))
+            if m.overconfidence_score is not None:
+                ocs_by_sess.setdefault(idx, []).append(m.overconfidence_score)
+            if m.loss_aversion_index is not None:
+                lai_by_sess.setdefault(idx, []).append(m.loss_aversion_index)
+
+    all_sess_nums = sorted(
+        set(dei_by_sess) | set(ocs_by_sess) | set(lai_by_sess)
+    )
+    rows: list[dict] = []
+    for sess_num in all_sess_nums:
+        for bias_key, data_dict in [
+            ("dei", dei_by_sess),
+            ("ocs", ocs_by_sess),
+            ("lai", lai_by_sess),
+        ]:
+            vals = data_dict.get(sess_num, [])
+            mean, sd = _mean_sd(vals)
+            rows.append({
+                "session_number": sess_num,
+                "bias": bias_key,
+                "mean": mean,
+                "sd": sd,
+                "n": len(vals),
+                "values": list(vals),
+            })
+    return rows
+
+
 def load_model_performance(reports_dir: str | Path = "reports") -> dict:
     """Load ML validation outputs from disk.
 

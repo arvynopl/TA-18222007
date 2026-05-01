@@ -20,6 +20,7 @@ from database.models import (
     OnboardingSurvey, User, UserAction, UserProfile,
 )
 from modules.utils.research_export import (
+    compute_cohort_session_progression,
     export_all_sessions_csv,
     export_all_users_csv,
     export_cdt_snapshots_csv,
@@ -382,6 +383,95 @@ def test_consent_only_user_qualifies_as_participant(db):
 
     rows = export_all_users_csv(db, participants_only=True)
     assert any(r["user_id"] == consenting.id for r in rows)
+
+
+# ---------------------------------------------------------------------------
+# Tests — compute_cohort_session_progression
+# ---------------------------------------------------------------------------
+def test_cohort_progression_empty(db):
+    """Empty database returns an empty list."""
+    rows = compute_cohort_session_progression(db, participants_only=False)
+    assert rows == []
+
+
+def test_cohort_progression_single_user_three_sessions(db):
+    """Single user with 3 sessions produces rows for session_numbers 1, 2, 3."""
+    base = datetime(2026, 7, 1, tzinfo=timezone.utc)
+    u = _make_user(db, "prog_solo")
+    _make_metric(db, u.id, base + timedelta(hours=0), dei=0.1, ocs=0.2, lai=1.0)
+    _make_metric(db, u.id, base + timedelta(hours=1), dei=0.2, ocs=0.3, lai=1.2)
+    _make_metric(db, u.id, base + timedelta(hours=2), dei=0.3, ocs=0.4, lai=1.4)
+
+    rows = compute_cohort_session_progression(db, participants_only=False)
+
+    # Should have 3 session_numbers × 3 biases = 9 rows.
+    assert len(rows) == 9
+    sess_nums = sorted({r["session_number"] for r in rows})
+    assert sess_nums == [1, 2, 3]
+    biases = {r["bias"] for r in rows}
+    assert biases == {"dei", "ocs", "lai"}
+
+    # For a single user, mean == the value itself.
+    dei_s1 = next(r for r in rows if r["session_number"] == 1 and r["bias"] == "dei")
+    assert dei_s1["mean"] == pytest.approx(0.1, abs=1e-4)
+    assert dei_s1["n"] == 1
+
+
+def test_cohort_progression_multi_user_average(db):
+    """Two users with different values — means are cohort averages."""
+    base = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    u1 = _make_user(db, "prog_u1")
+    u2 = _make_user(db, "prog_u2")
+    _make_metric(db, u1.id, base, dei=0.1, ocs=0.2, lai=1.0)
+    _make_metric(db, u2.id, base, dei=0.3, ocs=0.4, lai=1.4)
+
+    rows = compute_cohort_session_progression(db, participants_only=False)
+    dei_s1 = next(r for r in rows if r["session_number"] == 1 and r["bias"] == "dei")
+    assert dei_s1["n"] == 2
+    assert dei_s1["mean"] == pytest.approx((0.1 + 0.3) / 2, abs=1e-4)
+    assert len(dei_s1["values"]) == 2
+
+
+def test_cohort_progression_single_session_only(db):
+    """Users with only one session each yield one session_number."""
+    base = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    for name in ("s_a", "s_b"):
+        u = _make_user(db, name)
+        _make_metric(db, u.id, base, dei=0.2, ocs=0.3, lai=1.1)
+
+    rows = compute_cohort_session_progression(db, participants_only=False)
+    sess_nums = {r["session_number"] for r in rows}
+    assert sess_nums == {1}
+
+
+def test_cohort_progression_participants_only_filter(db):
+    """participants_only=True excludes ghost users from progression data."""
+    base = datetime(2026, 10, 1, tzinfo=timezone.utc)
+
+    real = User(
+        username="real_prog",
+        password_hash="$2b$12$realhash",
+        alias="real_prog",
+        experience_level="beginner",
+    )
+    db.add(real)
+    db.flush()
+    _make_metric(db, real.id, base, dei=0.1, ocs=0.1, lai=1.0)
+
+    ghost = User(alias="pgjson_ghost_prog", experience_level="beginner")
+    db.add(ghost)
+    db.flush()
+    _make_metric(db, ghost.id, base, dei=0.9, ocs=0.9, lai=2.5)
+
+    rows_all = compute_cohort_session_progression(db, participants_only=False)
+    rows_filt = compute_cohort_session_progression(db, participants_only=True)
+
+    dei_all = next(r for r in rows_all if r["bias"] == "dei")
+    dei_filt = next(r for r in rows_filt if r["bias"] == "dei")
+
+    assert dei_all["n"] == 2
+    assert dei_filt["n"] == 1
+    assert dei_filt["mean"] == pytest.approx(0.1, abs=1e-4)
 
 
 def test_load_model_performance_with_files(tmp_path):
