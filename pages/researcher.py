@@ -1,21 +1,21 @@
 """
-pages/researcher.py — Mode peneliti (researcher view).
+pages/researcher.py — Researcher mode (researcher view).
 
-Halaman tersembunyi untuk inspeksi data UAT pada level kohort. Akses melalui
-URL ``/?view=researcher`` dan dilindungi kata sandi (env var
-``CDT_RESEARCHER_PASSWORD``). Tidak ada tombol navigasi di header utama.
+Hidden page for cohort-level UAT data inspection. Accessed via the
+URL `/?view=researcher` and password-protected (env var
+`CDT_RESEARCHER_PASSWORD`). No navigation buttons are present in the main header.
 
-Bagian (urutan tab):
-    1. Ringkasan Kohort UAT
-    2. Tabel Peserta
-    3. Distribusi Bias (DEI / OCS / LAI)
-    4. Trajektori CDT Longitudinal
-    5. Korelasi Inter-Bias
-    6. Progresi Kohort per Sesi
-    7. Survei vs. Hasil Observasi
-    8. Survei UAT
-    9. Performa Model ML
-    10. Ekspor Massal CSV
+Sections (tab order):
+    1. UAT Cohort Summary
+    2. Participant Table
+    3. Bias Distribution (DEI / OCS / LAI)
+    4. Longitudinal CDT Trajectory
+    5. Inter-Bias Correlation
+    6. Cohort Progression per Session
+    7. Survey vs. Observed Results
+    8. UAT Survey
+    9. ML Model Performance
+    10. Bulk CSV Export
 """
 
 from __future__ import annotations

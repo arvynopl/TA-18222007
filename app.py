@@ -907,27 +907,25 @@ def _page_feedback_penguji() -> None:
 
     # --- Data use & resubmission disclosure (always shown) ---
     with st.expander(
-        "ℹ️ Bagaimana data Anda digunakan & cara mengisi ulang", expanded=False,
+        "ℹ️ Bagaimana data Anda digunakan dan cara mengisi ulang", expanded=False,
     ):
         st.markdown(
             """
-            **Apa yang dikumpulkan di halaman ini:** jawaban 10 pernyataan
+            **Apa yang dikumpulkan di halaman ini:** Jawaban 10 pernyataan
             singkat tentang kemudahan penggunaan sistem (skala 1–5) dan tiga
             pertanyaan terbuka yang opsional.
 
-            **Penggunaan data:** seluruh tanggapan dipakai murni untuk perbaikan
+            **Penggunaan data:** Seluruh tanggapan dipakai murni untuk perbaikan
             sistem dan penulisan laporan tugas akhir di ITB. Data disimpan pada
             *Neon Postgres* terenkripsi dan tidak dibagikan ke pihak ketiga.
 
-            **Mengisi ulang:** pendapat Anda boleh berubah setelah memakai
+            **Mengisi ulang:** Pendapat Anda boleh berubah setelah memakai
             sistem lebih lama. Anda **dapat mengirim ulang formulir ini kapan
-            saja** — tanpa batas. Setiap kiriman tersimpan sebagai catatan
-            terpisah (riwayat tidak ditimpa). Untuk analisis tesis, peneliti
+            saja** — tanpa batas. Untuk analisis tesis, peneliti
             menggunakan tanggapan **terbaru** Anda.
 
-            **Pelaporan bug:** silakan hubungi peneliti langsung melalui kanal
-            komunikasi yang Anda terima saat undangan (WhatsApp/email) — tidak
-            perlu mengisi formulir terpisah.
+            **Pelaporan bug:** Silakan hubungi peneliti langsung melalui kanal
+            komunikasi yang Anda terima saat undangan.
             """
         )
 
