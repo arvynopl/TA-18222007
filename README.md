@@ -3,12 +3,9 @@
 
 A **Cognitive Digital Twin (CDT)** prototype that detects three behavioral biases — Disposition Effect, Overconfidence, and Loss Aversion — in retail investors through a 14-round historical-replay trading simulation on 12 IDX stocks.
 
-This README is the single source of truth for both local development and Streamlit Community Cloud deployment. It supersedes the previous `README_DEPLOY.md`.
-
 > **Audience-specific entry points:**
 > - **Developers** → start at *Quick Start* (next section).
 > - **UAT participants** → see [`docs/PANDUAN_PENGUJI_UAT.md`](docs/PANDUAN_PENGUJI_UAT.md) (Bahasa Indonesia).
-> - **Researcher (thesis author)** → see [`docs/UAT_RESEARCHER_PLAN.md`](docs/UAT_RESEARCHER_PLAN.md) for the UAT execution playbook.
 > - **Thesis advisors deploying for the first time** → jump to *Production Deployment* below.
 
 ---
