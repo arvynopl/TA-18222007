@@ -27,7 +27,7 @@ bash setup.sh
 git clone https://github.com/arvynopl/TA-18222007.git
 cd TA-18222007
 pip install -r requirements.txt
-python idx_data_acquisition.py     # downloads OHLCV for 12 IDX tickers
+python scripts/idx_data_acquisition.py   # downloads OHLCV for 12 IDX tickers
 python -m database.seed            # idempotent seed of stock catalog + snapshots
 streamlit run app.py
 ```
@@ -123,7 +123,11 @@ data/
   all_market_snapshots.csv  ~2826 rows of OHLCV + indicators
 docs/
   PANDUAN_PENGUJI_UAT.md    Participant guide (Bahasa Indonesia)
-  UAT_RESEARCHER_PLAN.md    Researcher's UAT execution playbook
+scripts/
+  idx_data_acquisition.py   Download OHLCV data for 12 IDX tickers
+  run_ml_validation.py      Train and evaluate ML bias classifier
+  run_synthetic_validation.py  Synthetic data pipeline validation
+  generate_sample_uat_csv.py   Generate sample UAT export CSV
 ```
 
 ### Database Entities
@@ -328,7 +332,7 @@ Open the live URL (e.g. `https://cdt-bias-uat.streamlit.app`) and walk through t
       `users` should be ≥ 1 (your smoketest account). `market_snapshots` should be ~2826.
 - [ ] **No data in repo.** Run `git status` locally — you should see no new files. The app must never write to the container disk.
 
-If every box is ticked, the deploy is good. Share the URL with UAT testers per the playbook in `docs/UAT_RESEARCHER_PLAN.md`.
+If every box is ticked, the deploy is good. Share the URL with UAT testers using `docs/PANDUAN_PENGUJI_UAT.md` as the participant guide.
 
 ### §4. Rollback procedure
 
@@ -395,7 +399,7 @@ Repeat the verification checklist in §3.
 | `.streamlit/config.toml` | Theme, headless server, disabled telemetry. |
 | `.streamlit/secrets.toml.example` | Documents the secret keys; copy to `secrets.toml` locally. |
 | `app.py` (startup guard) | Refuses to start on Cloud without `CDT_DATABASE_URL`. |
-| `docs/DEPLOYMENT_PHASE1.md` | Background on the SQLite → Postgres migration. |
+| `docs/PANDUAN_PENGUJI_UAT.md` | UAT participant guide (Bahasa Indonesia). |
 
 ---
 

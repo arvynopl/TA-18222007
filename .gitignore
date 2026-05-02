@@ -1,44 +1,102 @@
-# macOS
+# ============================================================
+# .gitignore — CDT Bias Detection System (TA-18222007)
+# ============================================================
+
+# ------------------------------------------------------------
+# OS artifacts
+# ------------------------------------------------------------
 .DS_Store
 **/.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
 
-# Secrets / environment
+# ------------------------------------------------------------
+# Secrets / environment — NEVER commit credentials
+# ------------------------------------------------------------
 .env
 .env.*
 !.env.example
 .streamlit/secrets.toml
 
+# ------------------------------------------------------------
+# AI assistant context files — internal dev tooling only
+# ------------------------------------------------------------
+CLAUDE.md
+
+# ------------------------------------------------------------
 # Python bytecode / caches
+# ------------------------------------------------------------
 __pycache__/
 **/__pycache__/
 *.py[cod]
 *$py.class
+
+# Test / lint caches
 .pytest_cache/
+pytest-cache-files*
 .mypy_cache/
 .ruff_cache/
 
+# Coverage reports
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# ------------------------------------------------------------
 # Virtual environments
+# ------------------------------------------------------------
 .venv/
 venv/
 env/
 ENV/
+.python-venv/
 
-# Local SQLite databases
+# ------------------------------------------------------------
+# Local databases (dev only — use CDT_DATABASE_URL for prod)
+# ------------------------------------------------------------
 *.db
 *.sqlite
 *.sqlite3
 
+# ------------------------------------------------------------
 # Logs
+# ------------------------------------------------------------
 *.log
 logs/
+app.log
 
+# ------------------------------------------------------------
 # IDE / editor
+# ------------------------------------------------------------
 .vscode/
 .idea/
 *.swp
 *.swo
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
 
-# Build / packaging
+# ------------------------------------------------------------
+# Build / packaging / distribution
+# ------------------------------------------------------------
 build/
 dist/
 *.egg-info/
+MANIFEST
+*.whl
+*.tar.gz
+
+# ------------------------------------------------------------
+# Jupyter (if exploratory notebooks are created locally)
+# ------------------------------------------------------------
+*.ipynb
+.ipynb_checkpoints/
+
+# ------------------------------------------------------------
+# Streamlit local state (auto-generated)
+# ------------------------------------------------------------
+.streamlit/stats/
