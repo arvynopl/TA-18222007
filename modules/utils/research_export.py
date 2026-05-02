@@ -7,13 +7,14 @@ researcher dashboard. Mirrors the style of ``modules/utils/export.py`` but
 operates at the cohort level rather than per-session/per-user.
 
 Functions:
-    get_cohort_summary             — Cohort KPIs (counts, means, completion rate).
-    export_all_users_csv           — One row per user, joined with profile/survey/CDT.
-    export_all_sessions_csv        — One row per BiasMetric, with derived session_num.
-    export_cdt_snapshots_csv       — Longitudinal CDT trajectory across all users.
-    export_uat_feedback_csv        — Full UAT feedback submission history (SUS + open-ended).
-    export_post_session_surveys_csv — One row per post-session self-assessment submission.
-    load_model_performance         — Read ``reports/`` ML validation outputs from disk.
+    get_cohort_summary                  — Cohort KPIs (counts, means, completion rate).
+    export_all_users_csv                — One row per user, joined with profile/survey/CDT.
+    export_all_sessions_csv             — One row per BiasMetric, with derived session_num.
+    export_cdt_snapshots_csv            — Longitudinal CDT trajectory across all users.
+    export_uat_feedback_csv             — Full UAT feedback submission history (SUS + open-ended).
+    export_post_session_surveys_csv     — One row per post-session self-assessment submission.
+    compute_cohort_session_progression  — Per-session cohort bias progression (longitudinal).
+    load_model_performance              — Read ``reports/`` ML validation outputs from disk.
 """
 
 from __future__ import annotations
@@ -502,6 +503,64 @@ def export_post_session_surveys_csv(
             "self_loss_aversion": s.self_loss_aversion,
             "feedback_usefulness": s.feedback_usefulness,
         })
+    return rows
+
+
+def compute_cohort_session_progression(
+    db_session: Session,
+    *,
+    participants_only: bool = False,
+) -> list[dict]:
+    """Return per-session cohort bias progression for longitudinal analysis.
+
+    Each dict in the returned list represents one (bias, session_number) pair:
+        bias           — one of "dei", "ocs", "lai"
+        session_number — 1-indexed position within each user's session history
+        values         — list of individual (cohort) bias intensities for that slot
+        n              — len(values)
+
+    Ordered by bias key then session_number. Uses abs(DEI) to match the
+    intensity convention used elsewhere in the researcher dashboard.
+    """
+    qualified: Optional[set[int]] = (
+        _participant_user_ids(db_session) if participants_only else None
+    )
+    metrics_q = (
+        db_session.query(BiasMetric)
+        .order_by(BiasMetric.user_id, BiasMetric.computed_at)
+    )
+    if qualified is not None:
+        metrics_q = metrics_q.filter(BiasMetric.user_id.in_(qualified))
+    metrics = metrics_q.all()
+
+    # Assign per-user 1-indexed session numbers.
+    per_user_idx: dict[int, int] = {}
+    # groups[bias][session_number] = [values…]
+    groups: dict[str, dict[int, list[float]]] = {
+        "dei": {},
+        "ocs": {},
+        "lai": {},
+    }
+    for m in metrics:
+        per_user_idx[m.user_id] = per_user_idx.get(m.user_id, 0) + 1
+        sn = per_user_idx[m.user_id]
+        if m.disposition_dei is not None:
+            groups["dei"].setdefault(sn, []).append(abs(float(m.disposition_dei)))
+        if m.overconfidence_score is not None:
+            groups["ocs"].setdefault(sn, []).append(float(m.overconfidence_score))
+        if m.loss_aversion_index is not None:
+            groups["lai"].setdefault(sn, []).append(float(m.loss_aversion_index))
+
+    rows: list[dict] = []
+    for bias in ("dei", "ocs", "lai"):
+        for sn in sorted(groups[bias]):
+            vals = groups[bias][sn]
+            rows.append({
+                "bias": bias,
+                "session_number": sn,
+                "values": vals,
+                "n": len(vals),
+            })
     return rows
 
 
