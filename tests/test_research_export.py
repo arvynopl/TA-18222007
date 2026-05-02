@@ -21,7 +21,6 @@ from database.models import (
     UserProfile,
 )
 from modules.utils.research_export import (
-    compute_cohort_session_progression,
     export_all_sessions_csv,
     export_all_users_csv,
     export_cdt_snapshots_csv,
