@@ -881,9 +881,9 @@ _SUS_ITEMS_ID: list[tuple[str, str]] = [
 def _page_feedback_penguji() -> None:
     st.title("Feedback Penguji (UAT)")
     st.caption(
-        "Halaman ini ditujukan bagi penguji UAT. Mohon isi kuesioner *System "
-        "Usability Scale* (SUS) di bawah setelah menyelesaikan setidaknya satu "
-        "sesi simulasi. Pengisian membutuhkan waktu sekitar 3 menit."
+        "Halaman ini ditujukan bagi penguji UAT. Mohon isi kuesioner umpan balik "
+        "di bawah setelah menyelesaikan setidaknya satu sesi simulasi. Pengisian "
+        "membutuhkan waktu sekitar 3–5 menit."
     )
 
     user_id = st.session_state.get("user_id")
@@ -900,19 +900,48 @@ def _page_feedback_penguji() -> None:
             .order_by(UATFeedback.submitted_at.desc())
             .first()
         )
-        existing_score = existing.sus_score if existing else None
+        existing_count = (
+            sess.query(UATFeedback).filter_by(user_id=user_id).count()
+        )
         existing_submitted = existing.submitted_at if existing else None
 
-    if existing is not None:
-        st.success(
-            f"Anda telah mengirim respons SUS pada "
-            f"{fmt_datetime_wib(existing_submitted)} (skor: {existing_score:.1f}/100). "
-            f"Anda boleh mengirim ulang — respons terbaru yang akan dipakai untuk analisis."
+    # --- Data use & resubmission disclosure (always shown) ---
+    with st.expander(
+        "ℹ️ Bagaimana data Anda digunakan & cara mengisi ulang", expanded=False,
+    ):
+        st.markdown(
+            """
+            **Apa yang dikumpulkan di halaman ini:** jawaban 10 pernyataan
+            singkat tentang kemudahan penggunaan sistem (skala 1–5) dan tiga
+            pertanyaan terbuka yang opsional.
+
+            **Penggunaan data:** seluruh tanggapan dipakai murni untuk perbaikan
+            sistem dan penulisan laporan tugas akhir di ITB. Data disimpan pada
+            *Neon Postgres* terenkripsi dan tidak dibagikan ke pihak ketiga.
+
+            **Mengisi ulang:** pendapat Anda boleh berubah setelah memakai
+            sistem lebih lama. Anda **dapat mengirim ulang formulir ini kapan
+            saja** — tanpa batas. Setiap kiriman tersimpan sebagai catatan
+            terpisah (riwayat tidak ditimpa). Untuk analisis tesis, peneliti
+            menggunakan tanggapan **terbaru** Anda.
+
+            **Pelaporan bug:** silakan hubungi peneliti langsung melalui kanal
+            komunikasi yang Anda terima saat undangan (WhatsApp/email) — tidak
+            perlu mengisi formulir terpisah.
+            """
         )
 
-    st.markdown("#### Kuesioner SUS")
+    if existing is not None:
+        plural = "kali" if existing_count == 1 else f"kali (total {existing_count} kiriman)"
+        st.success(
+            f"Anda terakhir mengirim tanggapan pada "
+            f"**{fmt_datetime_wib(existing_submitted)}** — sudah {existing_count} {plural}. "
+            f"Silakan kirim ulang bila ingin memperbarui jawaban; tanggapan terbaru yang akan dipakai untuk analisis."
+        )
+
+    st.markdown("#### Bagian 1 — Kuesioner Usability (wajib)")
     st.caption(
-        "Skala 1 = Sangat Tidak Setuju, 5 = Sangat Setuju. "
+        "10 pernyataan singkat. Skala 1 = Sangat Tidak Setuju, 5 = Sangat Setuju. "
         "Pilih nilai yang paling sesuai dengan pengalaman Anda."
     )
 
@@ -927,20 +956,31 @@ def _page_feedback_penguji() -> None:
                 key=f"uat_{key}",
             )
 
-        st.markdown("#### Pertanyaan Terbuka")
+        st.markdown("#### Bagian 2 — Pertanyaan Terbuka (opsional)")
+        st.caption(
+            "Boleh dikosongkan. Namun, jawaban Anda — sekecil apa pun — sangat "
+            "membantu peneliti memahami konteks di balik skor numerik."
+        )
         confusing = st.text_area(
-            "Apa yang membingungkan?",
+            "Apa yang membingungkan? *(opsional)*",
             placeholder="Bagian sistem mana yang membingungkan atau sulit dipahami?",
             max_chars=2000,
             height=120,
             key="uat_open_confusing",
         )
         useful = st.text_area(
-            "Apa yang berguna?",
+            "Apa yang berguna? *(opsional)*",
             placeholder="Fitur atau bagian mana yang Anda rasa paling membantu?",
             max_chars=2000,
             height=120,
             key="uat_open_useful",
+        )
+        suggestion = st.text_area(
+            "Saran perbaikan atau ide fitur tambahan *(opsional)*",
+            placeholder="Apa yang ingin Anda lihat ditambahkan, diubah, atau dihilangkan?",
+            max_chars=2000,
+            height=120,
+            key="uat_open_suggestion",
         )
 
         submitted = st.form_submit_button(
@@ -950,20 +990,30 @@ def _page_feedback_penguji() -> None:
     if submitted:
         sid = st.session_state.get("last_session_id")
         try:
+            # Combine the optional 3rd open-ended question into open_useful
+            # to avoid a schema migration. Format: "<useful>\n\n[Saran:] <suggestion>"
+            useful_combined = (useful or "").strip()
+            sug_clean = (suggestion or "").strip()
+            if sug_clean:
+                if useful_combined:
+                    useful_combined = f"{useful_combined}\n\n[Saran perbaikan]\n{sug_clean}"
+                else:
+                    useful_combined = f"[Saran perbaikan]\n{sug_clean}"
+
             with get_session() as sess:
                 fb = UATFeedback(
                     user_id=user_id,
                     session_id=sid,
                     open_confusing=(confusing or "").strip() or None,
-                    open_useful=(useful or "").strip() or None,
+                    open_useful=useful_combined or None,
                     **responses,
                 )
                 sess.add(fb)
                 sess.flush()
                 computed_score = fb.sus_score
             st.success(
-                f"Terima kasih! Tanggapan Anda telah disimpan. "
-                f"Skor SUS Anda: **{computed_score:.1f}/100**."
+                "Terima kasih! Tanggapan Anda telah disimpan. "
+                "Anda dapat mengisi ulang formulir ini kapan saja bila pendapat Anda berubah."
             )
             logger.info(
                 "UAT feedback submitted: user=%s sus_score=%.1f", user_id, computed_score

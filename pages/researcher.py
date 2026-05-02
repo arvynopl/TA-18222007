@@ -13,8 +13,9 @@ Bagian (urutan tab):
     5. Korelasi Inter-Bias
     6. Progresi Kohort per Sesi
     7. Survei vs. Hasil Observasi
-    8. Performa Model ML
-    9. Ekspor Massal CSV
+    8. Survei UAT
+    9. Performa Model ML
+    10. Ekspor Massal CSV
 """
 
 from __future__ import annotations
@@ -47,6 +48,8 @@ from modules.utils.research_export import (
     export_all_sessions_csv,
     export_all_users_csv,
     export_cdt_snapshots_csv,
+    export_post_session_surveys_csv,
+    export_uat_feedback_csv,
     get_cohort_summary,
     load_model_performance,
 )
@@ -998,17 +1001,150 @@ def _section_model_performance() -> None:
         )
 
 
+def _section_uat_surveys(
+    uat_rows: list[dict],
+    post_session_rows: list[dict],
+) -> None:
+    """Render the UAT survey + post-session survey inspection tab."""
+    st.subheader("Survei UAT")
+    st.caption(
+        "Riwayat lengkap setiap kiriman survei. Tidak ada penimpaan: setiap "
+        "submit menjadi baris baru. Untuk analisis tesis, gunakan kiriman "
+        "**terbaru per pengguna** (ambil baris dengan `submission_index` "
+        "tertinggi per `user_id`)."
+    )
+
+    # --- KPIs row ---
+    n_uat_total = len(uat_rows)
+    n_uat_users = len({r["user_id"] for r in uat_rows}) if uat_rows else 0
+    sus_scores = [r["sus_score"] for r in uat_rows if r.get("sus_score") is not None]
+    avg_sus = sum(sus_scores) / len(sus_scores) if sus_scores else None
+
+    # Latest-per-user SUS for the recommended analysis aggregate
+    latest_per_user: dict[int, dict] = {}
+    for r in uat_rows:
+        prev = latest_per_user.get(r["user_id"])
+        if prev is None or r["submission_index"] > prev["submission_index"]:
+            latest_per_user[r["user_id"]] = r
+    latest_sus = [
+        r["sus_score"] for r in latest_per_user.values()
+        if r.get("sus_score") is not None
+    ]
+    avg_latest_sus = (
+        sum(latest_sus) / len(latest_sus) if latest_sus else None
+    )
+
+    n_post_total = len(post_session_rows)
+    n_post_users = (
+        len({r["user_id"] for r in post_session_rows}) if post_session_rows else 0
+    )
+
+    cols = responsive_columns(4, n_mobile=2)
+    cols[0].metric("Kiriman UAT", n_uat_total)
+    cols[1].metric("Pengguna unik (UAT)", n_uat_users)
+    cols[2].metric(
+        "Rata-rata SUS (semua kiriman)",
+        f"{avg_sus:.1f}" if avg_sus is not None else "—",
+    )
+    cols[3].metric(
+        "Rata-rata SUS (terbaru per pengguna)",
+        f"{avg_latest_sus:.1f}" if avg_latest_sus is not None else "—",
+        help=(
+            "Aggregate yang direkomendasikan untuk analisis tesis. "
+            "Mengambil 1 kiriman terbaru per pengguna lalu merata-ratakan."
+        ),
+    )
+
+    # --- UAT submissions table ---
+    st.markdown("**Riwayat Submit UAT (SUS + Pertanyaan Terbuka)**")
+    if uat_rows:
+        df_uat = pd.DataFrame(uat_rows)
+        st.dataframe(
+            df_uat,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "user_id": st.column_config.NumberColumn("ID"),
+                "submission_index": st.column_config.NumberColumn("Kiriman ke-"),
+                "sus_score": st.column_config.NumberColumn(
+                    "Skor SUS", format="%.1f",
+                ),
+                "open_confusing": st.column_config.TextColumn(
+                    "Membingungkan", width="medium",
+                ),
+                "open_useful": st.column_config.TextColumn(
+                    "Berguna / Saran", width="medium",
+                ),
+            },
+        )
+        st.download_button(
+            label="Unduh Survei UAT (CSV — riwayat lengkap)",
+            data=_csv_bytes(uat_rows),
+            file_name="research_uat_feedback.csv",
+            mime="text/csv",
+            key="dl_uat_feedback",
+            use_container_width=True,
+        )
+    else:
+        st.info("Belum ada kiriman UAT.")
+
+    st.divider()
+
+    # --- Post-session surveys ---
+    st.markdown("**Survei Pasca-Sesi (Self-Assessment)**")
+    st.caption(
+        "Satu baris per (pengguna × sesi). Skor `feedback_usefulness` "
+        "(1–5) dan tiga skor self-awareness bias dipakai untuk validasi "
+        "metakognitif di Bab VI."
+    )
+    cols2 = responsive_columns(2, n_mobile=2)
+    cols2[0].metric("Total Kiriman", n_post_total)
+    cols2[1].metric("Pengguna unik", n_post_users)
+
+    if post_session_rows:
+        df_post = pd.DataFrame(post_session_rows)
+        st.dataframe(
+            df_post,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "user_id": st.column_config.NumberColumn("ID"),
+                "self_overconfidence": st.column_config.NumberColumn("Self-OC"),
+                "self_disposition": st.column_config.NumberColumn("Self-DEI"),
+                "self_loss_aversion": st.column_config.NumberColumn("Self-LAI"),
+                "feedback_usefulness": st.column_config.NumberColumn(
+                    "Useful (1–5)",
+                ),
+            },
+        )
+        st.download_button(
+            label="Unduh Survei Pasca-Sesi (CSV)",
+            data=_csv_bytes(post_session_rows),
+            file_name="research_post_session_surveys.csv",
+            mime="text/csv",
+            key="dl_post_session",
+            use_container_width=True,
+        )
+    else:
+        st.info("Belum ada kiriman survei pasca-sesi.")
+
+
 def _section_bulk_export(
     users_rows: list[dict],
     sessions_rows: list[dict],
     snapshots_rows: list[dict],
+    uat_rows: list[dict],
+    post_session_rows: list[dict],
 ) -> None:
     st.subheader("Ekspor Massal")
     st.caption(
-        "Unduh keseluruhan data UAT untuk analisis statistik di luar aplikasi."
+        "Unduh keseluruhan data UAT untuk analisis statistik di luar aplikasi. "
+        "Survei UAT dan pasca-sesi diekspor sebagai riwayat lengkap (semua "
+        "kiriman; gunakan `submission_index` tertinggi per pengguna untuk "
+        "agregat terbaru)."
     )
-    cols = responsive_columns(3, n_mobile=1)
-    with cols[0]:
+    row1 = responsive_columns(3, n_mobile=1)
+    with row1[0]:
         st.download_button(
             label="Semua Pengguna (CSV)",
             data=_csv_bytes(users_rows),
@@ -1018,7 +1154,7 @@ def _section_bulk_export(
             disabled=not users_rows,
             use_container_width=True,
         )
-    with cols[1]:
+    with row1[1]:
         st.download_button(
             label="Semua Sesi (CSV)",
             data=_csv_bytes(sessions_rows),
@@ -1028,7 +1164,7 @@ def _section_bulk_export(
             disabled=not sessions_rows,
             use_container_width=True,
         )
-    with cols[2]:
+    with row1[2]:
         st.download_button(
             label="Snapshot CDT (CSV)",
             data=_csv_bytes(snapshots_rows),
@@ -1036,6 +1172,28 @@ def _section_bulk_export(
             mime="text/csv",
             key="dl_all_snapshots",
             disabled=not snapshots_rows,
+            use_container_width=True,
+        )
+
+    row2 = responsive_columns(2, n_mobile=1)
+    with row2[0]:
+        st.download_button(
+            label="Survei UAT (CSV — riwayat lengkap)",
+            data=_csv_bytes(uat_rows),
+            file_name="research_uat_feedback.csv",
+            mime="text/csv",
+            key="dl_bulk_uat_feedback",
+            disabled=not uat_rows,
+            use_container_width=True,
+        )
+    with row2[1]:
+        st.download_button(
+            label="Survei Pasca-Sesi (CSV)",
+            data=_csv_bytes(post_session_rows),
+            file_name="research_post_session_surveys.csv",
+            mime="text/csv",
+            key="dl_bulk_post_session",
+            disabled=not post_session_rows,
             use_container_width=True,
         )
 
@@ -1077,9 +1235,9 @@ def render_researcher_page() -> None:
         users_rows = export_all_users_csv(sess, participants_only=True)
         sessions_rows = export_all_sessions_csv(sess, participants_only=True)
         snapshots_rows = export_cdt_snapshots_csv(sess, participants_only=True)
-        progression_rows = compute_cohort_session_progression(
-            sess, participants_only=True,
-        )
+        progression_rows = compute_cohort_session_progression(sess, participants_only=True)
+        uat_rows = export_uat_feedback_csv(sess, participants_only=True)
+        post_session_rows = export_post_session_surveys_csv(sess, participants_only=True)
 
     tabs = responsive_tabs([
         "Ringkasan",
@@ -1089,6 +1247,7 @@ def render_researcher_page() -> None:
         "Korelasi",
         "Progresi",
         "Survei vs. Observasi",
+        "Survei UAT",
         "Model ML",
         "Ekspor",
     ])
@@ -1108,9 +1267,17 @@ def render_researcher_page() -> None:
     with tabs[6]:
         _section_survey_vs_observed(users_rows)
     with tabs[7]:
-        _section_model_performance()
+        _section_uat_surveys(uat_rows, post_session_rows)
     with tabs[8]:
-        _section_bulk_export(users_rows, sessions_rows, snapshots_rows)
+        _section_model_performance()
+    with tabs[9]:
+        _section_bulk_export(
+            users_rows, 
+            sessions_rows, 
+            snapshots_rows, 
+            uat_rows, 
+            post_session_rows
+        )
 
 
 # When Streamlit auto-discovers this file under ``pages/`` and executes it as

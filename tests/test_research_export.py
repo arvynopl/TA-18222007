@@ -17,13 +17,16 @@ import pytest
 
 from database.models import (
     BiasMetric, CdtSnapshot, CognitiveProfile, ConsentLog,
-    OnboardingSurvey, User, UserAction, UserProfile,
+    OnboardingSurvey, PostSessionSurvey, UATFeedback, User, UserAction,
+    UserProfile,
 )
 from modules.utils.research_export import (
     compute_cohort_session_progression,
     export_all_sessions_csv,
     export_all_users_csv,
     export_cdt_snapshots_csv,
+    export_post_session_surveys_csv,
+    export_uat_feedback_csv,
     get_cohort_summary,
     load_model_performance,
 )
@@ -386,92 +389,216 @@ def test_consent_only_user_qualifies_as_participant(db):
 
 
 # ---------------------------------------------------------------------------
-# Tests — compute_cohort_session_progression
+# Tests — export_uat_feedback_csv (append-only history)
 # ---------------------------------------------------------------------------
-def test_cohort_progression_empty(db):
-    """Empty database returns an empty list."""
-    rows = compute_cohort_session_progression(db, participants_only=False)
+def _make_uat_feedback(
+    db, user_id: int, submitted_at: datetime,
+    *, sus_values: list[int] | None = None,
+    confusing: str | None = None, useful: str | None = None,
+    session_id: str | None = None,
+) -> UATFeedback:
+    """Insert a UATFeedback row. ``sus_values`` is a 10-int list mapped to
+    sus_q1..sus_q10; defaults to all-3 (neutral) which scores 50."""
+    if sus_values is None:
+        sus_values = [3] * 10
+    fb = UATFeedback(
+        user_id=user_id,
+        session_id=session_id,
+        sus_q1=sus_values[0], sus_q2=sus_values[1], sus_q3=sus_values[2],
+        sus_q4=sus_values[3], sus_q5=sus_values[4], sus_q6=sus_values[5],
+        sus_q7=sus_values[6], sus_q8=sus_values[7], sus_q9=sus_values[8],
+        sus_q10=sus_values[9],
+        open_confusing=confusing,
+        open_useful=useful,
+        submitted_at=submitted_at,
+    )
+    db.add(fb)
+    db.flush()
+    return fb
+
+
+def test_export_uat_feedback_csv_empty(db):
+    """No feedback rows → empty list, never an error."""
+    rows = export_uat_feedback_csv(db)
     assert rows == []
 
 
-def test_cohort_progression_single_user_three_sessions(db):
-    """Single user with 3 sessions produces rows for session_numbers 1, 2, 3."""
+def test_export_uat_feedback_csv_columns(db):
+    u = _make_user(db, "uat_schema")
     base = datetime(2026, 7, 1, tzinfo=timezone.utc)
-    u = _make_user(db, "prog_solo")
-    _make_metric(db, u.id, base + timedelta(hours=0), dei=0.1, ocs=0.2, lai=1.0)
-    _make_metric(db, u.id, base + timedelta(hours=1), dei=0.2, ocs=0.3, lai=1.2)
-    _make_metric(db, u.id, base + timedelta(hours=2), dei=0.3, ocs=0.4, lai=1.4)
-
-    rows = compute_cohort_session_progression(db, participants_only=False)
-
-    # Should have 3 session_numbers × 3 biases = 9 rows.
-    assert len(rows) == 9
-    sess_nums = sorted({r["session_number"] for r in rows})
-    assert sess_nums == [1, 2, 3]
-    biases = {r["bias"] for r in rows}
-    assert biases == {"dei", "ocs", "lai"}
-
-    # For a single user, mean == the value itself.
-    dei_s1 = next(r for r in rows if r["session_number"] == 1 and r["bias"] == "dei")
-    assert dei_s1["mean"] == pytest.approx(0.1, abs=1e-4)
-    assert dei_s1["n"] == 1
+    _make_uat_feedback(db, u.id, base)
+    rows = export_uat_feedback_csv(db)
+    expected = {
+        "user_id", "username", "session_id", "submitted_at",
+        "submission_index",
+        "sus_q1", "sus_q2", "sus_q3", "sus_q4", "sus_q5",
+        "sus_q6", "sus_q7", "sus_q8", "sus_q9", "sus_q10",
+        "sus_score", "open_confusing", "open_useful",
+    }
+    assert expected.issubset(set(rows[0].keys()))
 
 
-def test_cohort_progression_multi_user_average(db):
-    """Two users with different values — means are cohort averages."""
+def test_export_uat_feedback_csv_preserves_all_resubmissions(db):
+    """Critical UAT contract: re-submissions must NOT overwrite. Every
+    submission appears as its own row, ordered chronologically per user.
+    Submission index is 1-based per user."""
+    u = _make_user(db, "uat_resubmit")
+    base = datetime(2026, 7, 1, tzinfo=timezone.utc)
+    # Three submissions inserted out-of-order to verify ORDER BY clause.
+    _make_uat_feedback(db, u.id, base + timedelta(hours=2),
+                       sus_values=[5] * 10, useful="third")
+    _make_uat_feedback(db, u.id, base + timedelta(hours=0),
+                       sus_values=[1] * 10, useful="first")
+    _make_uat_feedback(db, u.id, base + timedelta(hours=1),
+                       sus_values=[3] * 10, useful="second")
+
+    rows = export_uat_feedback_csv(db)
+    assert len(rows) == 3, "history must be preserved (no upsert/overwrite)"
+    indices = [r["submission_index"] for r in rows]
+    usefuls = [r["open_useful"] for r in rows]
+    assert indices == [1, 2, 3]
+    assert usefuls == ["first", "second", "third"]
+
+
+def test_export_uat_feedback_csv_sus_score_computed(db):
+    """The exported sus_score must match the model's computed property."""
+    u = _make_user(db, "uat_score")
     base = datetime(2026, 8, 1, tzinfo=timezone.utc)
-    u1 = _make_user(db, "prog_u1")
-    u2 = _make_user(db, "prog_u2")
-    _make_metric(db, u1.id, base, dei=0.1, ocs=0.2, lai=1.0)
-    _make_metric(db, u2.id, base, dei=0.3, ocs=0.4, lai=1.4)
-
-    rows = compute_cohort_session_progression(db, participants_only=False)
-    dei_s1 = next(r for r in rows if r["session_number"] == 1 and r["bias"] == "dei")
-    assert dei_s1["n"] == 2
-    assert dei_s1["mean"] == pytest.approx((0.1 + 0.3) / 2, abs=1e-4)
-    assert len(dei_s1["values"]) == 2
+    # Strong positive: all odd=5, all even=1 → SUS 100
+    _make_uat_feedback(
+        db, u.id, base, sus_values=[5, 1, 5, 1, 5, 1, 5, 1, 5, 1],
+    )
+    rows = export_uat_feedback_csv(db)
+    assert rows[0]["sus_score"] == pytest.approx(100.0)
 
 
-def test_cohort_progression_single_session_only(db):
-    """Users with only one session each yield one session_number."""
+def test_export_uat_feedback_csv_orders_across_users(db):
+    """Rows are grouped by user_id, then by submitted_at within each user."""
+    u_a = _make_user(db, "uat_order_a")
+    u_b = _make_user(db, "uat_order_b")
     base = datetime(2026, 9, 1, tzinfo=timezone.utc)
-    for name in ("s_a", "s_b"):
-        u = _make_user(db, name)
-        _make_metric(db, u.id, base, dei=0.2, ocs=0.3, lai=1.1)
+    _make_uat_feedback(db, u_b.id, base + timedelta(hours=1))
+    _make_uat_feedback(db, u_a.id, base + timedelta(hours=2))
+    _make_uat_feedback(db, u_a.id, base + timedelta(hours=0))
+    _make_uat_feedback(db, u_b.id, base + timedelta(hours=3))
 
-    rows = compute_cohort_session_progression(db, participants_only=False)
-    sess_nums = {r["session_number"] for r in rows}
-    assert sess_nums == {1}
+    rows = export_uat_feedback_csv(db)
+    keys = [(r["user_id"], r["submission_index"]) for r in rows]
+    # User A's two rows come first (lower id), each indexed 1..2 by time;
+    # User B's two rows next, each indexed 1..2 by time.
+    assert keys == [
+        (u_a.id, 1), (u_a.id, 2),
+        (u_b.id, 1), (u_b.id, 2),
+    ]
 
 
-def test_cohort_progression_participants_only_filter(db):
-    """participants_only=True excludes ghost users from progression data."""
+def test_export_uat_feedback_csv_excludes_non_participants(db):
+    """A ghost user (no consent / profile / auth) must be filtered out when
+    participants_only=True."""
     base = datetime(2026, 10, 1, tzinfo=timezone.utc)
-
     real = User(
-        username="real_prog",
+        username="real_uat",
         password_hash="$2b$12$realhash",
-        alias="real_prog",
+        alias="real_uat",
         experience_level="beginner",
     )
-    db.add(real)
+    db.add(real); db.flush()
+    _make_profile(db, real.id)
+    _make_uat_feedback(db, real.id, base, useful="real")
+
+    ghost = User(alias="pgjson_ghost_uat", experience_level="beginner")
+    db.add(ghost); db.flush()
+    _make_uat_feedback(db, ghost.id, base, useful="ghost")
+
+    rows_all = export_uat_feedback_csv(db)
+    rows_filt = export_uat_feedback_csv(db, participants_only=True)
+    assert len(rows_all) == 2
+    assert len(rows_filt) == 1
+    assert rows_filt[0]["open_useful"] == "real"
+
+
+# ---------------------------------------------------------------------------
+# Tests — export_post_session_surveys_csv
+# ---------------------------------------------------------------------------
+def _make_post_session(
+    db, user_id: int, session_id: str, submitted_at: datetime,
+    *, oc: int = 3, dei: int = 3, lai: int = 3, useful: int = 4,
+) -> PostSessionSurvey:
+    s = PostSessionSurvey(
+        user_id=user_id,
+        session_id=session_id,
+        self_overconfidence=oc,
+        self_disposition=dei,
+        self_loss_aversion=lai,
+        feedback_usefulness=useful,
+        submitted_at=submitted_at,
+    )
+    db.add(s)
     db.flush()
-    _make_metric(db, real.id, base, dei=0.1, ocs=0.1, lai=1.0)
+    return s
 
-    ghost = User(alias="pgjson_ghost_prog", experience_level="beginner")
-    db.add(ghost)
-    db.flush()
-    _make_metric(db, ghost.id, base, dei=0.9, ocs=0.9, lai=2.5)
 
-    rows_all = compute_cohort_session_progression(db, participants_only=False)
-    rows_filt = compute_cohort_session_progression(db, participants_only=True)
+def test_export_post_session_surveys_csv_empty(db):
+    rows = export_post_session_surveys_csv(db)
+    assert rows == []
 
-    dei_all = next(r for r in rows_all if r["bias"] == "dei")
-    dei_filt = next(r for r in rows_filt if r["bias"] == "dei")
 
-    assert dei_all["n"] == 2
-    assert dei_filt["n"] == 1
-    assert dei_filt["mean"] == pytest.approx(0.1, abs=1e-4)
+def test_export_post_session_surveys_csv_columns(db):
+    u = _make_user(db, "pss_schema")
+    base = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    _make_post_session(db, u.id, str(uuid.uuid4()), base)
+    rows = export_post_session_surveys_csv(db)
+    expected = {
+        "user_id", "username", "session_id", "submitted_at",
+        "self_overconfidence", "self_disposition", "self_loss_aversion",
+        "feedback_usefulness",
+    }
+    assert expected.issubset(set(rows[0].keys()))
+
+
+def test_export_post_session_surveys_csv_one_per_session(db):
+    """Each session yields one row; multiple sessions per user yield
+    multiple rows ordered by submitted_at."""
+    u = _make_user(db, "pss_multi")
+    base = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    sid_a, sid_b = str(uuid.uuid4()), str(uuid.uuid4())
+    # Insert in reverse to verify ORDER BY.
+    _make_post_session(
+        db, u.id, sid_b, base + timedelta(hours=1),
+        oc=4, dei=2, lai=5, useful=3,
+    )
+    _make_post_session(
+        db, u.id, sid_a, base + timedelta(hours=0),
+        oc=2, dei=4, lai=2, useful=5,
+    )
+
+    rows = export_post_session_surveys_csv(db)
+    assert len(rows) == 2
+    assert rows[0]["session_id"] == sid_a
+    assert rows[1]["session_id"] == sid_b
+    assert rows[0]["feedback_usefulness"] == 5
+    assert rows[1]["feedback_usefulness"] == 3
+
+
+def test_export_post_session_surveys_csv_excludes_non_participants(db):
+    base = datetime(2026, 12, 1, tzinfo=timezone.utc)
+    real = User(
+        username="real_pss",
+        password_hash="$2b$12$realhash",
+        alias="real_pss",
+        experience_level="beginner",
+    )
+    db.add(real); db.flush()
+    _make_profile(db, real.id)
+    _make_post_session(db, real.id, str(uuid.uuid4()), base, useful=5)
+
+    ghost = User(alias="pgjson_ghost_pss", experience_level="beginner")
+    db.add(ghost); db.flush()
+    _make_post_session(db, ghost.id, str(uuid.uuid4()), base, useful=1)
+
+    rows_filt = export_post_session_surveys_csv(db, participants_only=True)
+    assert len(rows_filt) == 1
+    assert rows_filt[0]["feedback_usefulness"] == 5
 
 
 def test_load_model_performance_with_files(tmp_path):

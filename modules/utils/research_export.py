@@ -7,11 +7,13 @@ researcher dashboard. Mirrors the style of ``modules/utils/export.py`` but
 operates at the cohort level rather than per-session/per-user.
 
 Functions:
-    get_cohort_summary       — Cohort KPIs (counts, means, completion rate).
-    export_all_users_csv     — One row per user, joined with profile/survey/CDT.
-    export_all_sessions_csv  — One row per BiasMetric, with derived session_num.
-    export_cdt_snapshots_csv — Longitudinal CDT trajectory across all users.
-    load_model_performance   — Read ``reports/`` ML validation outputs from disk.
+    get_cohort_summary             — Cohort KPIs (counts, means, completion rate).
+    export_all_users_csv           — One row per user, joined with profile/survey/CDT.
+    export_all_sessions_csv        — One row per BiasMetric, with derived session_num.
+    export_cdt_snapshots_csv       — Longitudinal CDT trajectory across all users.
+    export_uat_feedback_csv        — Full UAT feedback submission history (SUS + open-ended).
+    export_post_session_surveys_csv — One row per post-session self-assessment submission.
+    load_model_performance         — Read ``reports/`` ML validation outputs from disk.
 """
 
 from __future__ import annotations
@@ -27,7 +29,8 @@ from sqlalchemy.orm import Session
 
 from database.models import (
     BiasMetric, CdtSnapshot, CognitiveProfile, ConsentLog,
-    OnboardingSurvey, User, UserAction, UserProfile, UserSurvey,
+    OnboardingSurvey, PostSessionSurvey, UATFeedback, User, UserAction,
+    UserProfile, UserSurvey,
 )
 
 logger = logging.getLogger(__name__)
@@ -387,78 +390,118 @@ def export_cdt_snapshots_csv(
     return rows
 
 
-def compute_cohort_session_progression(
+def export_uat_feedback_csv(
     db_session: Session,
     *,
-    participants_only: bool = True,
+    participants_only: bool = False,
 ) -> list[dict]:
-    """Cohort-level bias means aligned by within-user session number.
+    """Full submission history of UAT feedback (SUS + open-ended).
 
-    Each user's sessions are numbered 1, 2, 3, … in chronological order
-    (earliest computed_at = session 1).  Values are then averaged across all
-    users who reached that session number, giving a cohort-level progression.
+    UATFeedback is intentionally append-only at the DB level — there is no
+    UNIQUE constraint on user_id, so re-submissions create new rows. This
+    function returns **every** submission, ordered by ``user_id, submitted_at``,
+    so the researcher can audit the full revision trail.
 
-    Returns a list sorted by (session_number, bias).  Each dict has:
-        session_number : int   — 1-indexed within each user's history
-        bias           : str   — "dei", "ocs", or "lai"
-        mean           : float
-        sd             : float
-        n              : int   — number of users contributing to this point
-        values         : list[float] — raw values; useful for bootstrap CI
+    Columns:
+        user_id, username, session_id, submitted_at, submission_index
+        (1-indexed within user, by submitted_at ascending),
+        sus_q1 .. sus_q10, sus_score, open_confusing, open_useful.
+
+    The ``sus_score`` column is computed via the standard SUS formula
+    (range 0–100, higher = better usability) and included for the researcher's
+    convenience; latest-per-user is the recommended aggregation for analysis
+    (use a groupby on user_id + max submission_index).
 
     Args:
-        participants_only: Restrict to qualified UAT participants (default True).
+      participants_only: When True, restrict to qualified UAT participants
+        (consent / profile / auth). Use this for the researcher dashboard.
     """
     qualified: Optional[set[int]] = (
         _participant_user_ids(db_session) if participants_only else None
     )
-    metrics_q = (
-        db_session.query(BiasMetric)
-        .order_by(BiasMetric.user_id, BiasMetric.computed_at)
+    fb_q = (
+        db_session.query(UATFeedback)
+        .order_by(UATFeedback.user_id, UATFeedback.submitted_at)
     )
     if qualified is not None:
-        metrics_q = metrics_q.filter(BiasMetric.user_id.in_(qualified))
-    metrics = metrics_q.all()
+        fb_q = fb_q.filter(UATFeedback.user_id.in_(qualified))
+    feedback_rows = fb_q.all()
+    users = {u.id: u for u in db_session.query(User).all()}
 
-    # Group metrics per user (already ordered by computed_at within each user
-    # because the query sorts by user_id then computed_at).
-    per_user: dict[int, list[BiasMetric]] = {}
-    for m in metrics:
-        per_user.setdefault(m.user_id, []).append(m)
-
-    dei_by_sess: dict[int, list[float]] = {}
-    ocs_by_sess: dict[int, list[float]] = {}
-    lai_by_sess: dict[int, list[float]] = {}
-
-    for uid, user_metrics in per_user.items():
-        for idx, m in enumerate(user_metrics, start=1):
-            if m.disposition_dei is not None:
-                dei_by_sess.setdefault(idx, []).append(abs(m.disposition_dei))
-            if m.overconfidence_score is not None:
-                ocs_by_sess.setdefault(idx, []).append(m.overconfidence_score)
-            if m.loss_aversion_index is not None:
-                lai_by_sess.setdefault(idx, []).append(m.loss_aversion_index)
-
-    all_sess_nums = sorted(
-        set(dei_by_sess) | set(ocs_by_sess) | set(lai_by_sess)
-    )
+    per_user_idx: dict[int, int] = {}
     rows: list[dict] = []
-    for sess_num in all_sess_nums:
-        for bias_key, data_dict in [
-            ("dei", dei_by_sess),
-            ("ocs", ocs_by_sess),
-            ("lai", lai_by_sess),
-        ]:
-            vals = data_dict.get(sess_num, [])
-            mean, sd = _mean_sd(vals)
-            rows.append({
-                "session_number": sess_num,
-                "bias": bias_key,
-                "mean": mean,
-                "sd": sd,
-                "n": len(vals),
-                "values": list(vals),
-            })
+    for fb in feedback_rows:
+        per_user_idx[fb.user_id] = per_user_idx.get(fb.user_id, 0) + 1
+        u = users.get(fb.user_id)
+        rows.append({
+            "user_id": fb.user_id,
+            "username": (u.username or u.alias) if u else None,
+            "session_id": fb.session_id,
+            "submitted_at": fb.submitted_at.isoformat() if fb.submitted_at else None,
+            "submission_index": per_user_idx[fb.user_id],
+            "sus_q1": fb.sus_q1,
+            "sus_q2": fb.sus_q2,
+            "sus_q3": fb.sus_q3,
+            "sus_q4": fb.sus_q4,
+            "sus_q5": fb.sus_q5,
+            "sus_q6": fb.sus_q6,
+            "sus_q7": fb.sus_q7,
+            "sus_q8": fb.sus_q8,
+            "sus_q9": fb.sus_q9,
+            "sus_q10": fb.sus_q10,
+            "sus_score": _round(fb.sus_score, 2),
+            "open_confusing": fb.open_confusing,
+            "open_useful": fb.open_useful,
+        })
+    return rows
+
+
+def export_post_session_surveys_csv(
+    db_session: Session,
+    *,
+    participants_only: bool = False,
+) -> list[dict]:
+    """One row per PostSessionSurvey submission.
+
+    PostSessionSurvey has a UNIQUE(user_id, session_id) constraint, so users
+    submit at most once per simulation session. Across sessions, however, each
+    submission is a new row — providing a longitudinal record of post-feedback
+    metacognition.
+
+    Columns:
+        user_id, username, session_id, submitted_at,
+        self_overconfidence, self_disposition, self_loss_aversion,
+        feedback_usefulness.
+    Ordered by ``user_id, submitted_at``.
+
+    Args:
+      participants_only: When True, restrict to qualified UAT participants.
+    """
+    qualified: Optional[set[int]] = (
+        _participant_user_ids(db_session) if participants_only else None
+    )
+    pss_q = (
+        db_session.query(PostSessionSurvey)
+        .order_by(PostSessionSurvey.user_id, PostSessionSurvey.submitted_at)
+    )
+    if qualified is not None:
+        pss_q = pss_q.filter(PostSessionSurvey.user_id.in_(qualified))
+    surveys = pss_q.all()
+    users = {u.id: u for u in db_session.query(User).all()}
+
+    rows: list[dict] = []
+    for s in surveys:
+        u = users.get(s.user_id)
+        rows.append({
+            "user_id": s.user_id,
+            "username": (u.username or u.alias) if u else None,
+            "session_id": s.session_id,
+            "submitted_at": s.submitted_at.isoformat() if s.submitted_at else None,
+            "self_overconfidence": s.self_overconfidence,
+            "self_disposition": s.self_disposition,
+            "self_loss_aversion": s.self_loss_aversion,
+            "feedback_usefulness": s.feedback_usefulness,
+        })
     return rows
 
 
