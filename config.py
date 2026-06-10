@@ -93,6 +93,16 @@ AUTH_PASSWORD_MIN_LEN: int = 8
 # ---------------------------------------------------------------------------
 RESEARCHER_PASSWORD = os.environ.get("CDT_RESEARCHER_PASSWORD") or None
 
+# Usernames explicitly excluded from UAT cohort statistics even if they hold
+# consent / profile / auth credentials. These are developer/test accounts that
+# would otherwise distort cohort means (e.g. the long-running "test1" seed used
+# during development). Override via env (comma-separated) if needed.
+COHORT_EXCLUDED_USERNAMES: set[str] = {
+    u.strip()
+    for u in (os.environ.get("CDT_COHORT_EXCLUDED_USERNAMES") or "test1").split(",")
+    if u.strip()
+}
+
 # ---------------------------------------------------------------------------
 # Stock catalog
 # ---------------------------------------------------------------------------

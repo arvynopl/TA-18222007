@@ -619,7 +619,7 @@ def reset_simulation() -> None:
         "sim_session_id", "sim_portfolio", "sim_engine", "sim_window",
         "sim_stock_ids", "sim_current_round", "sim_round_start_time", "sim_complete",
         "sim_submitted_round", "stock_metadata", "sim_pre_history", "sim_pending_orders",
-        "stock_descriptions",
+        "stock_descriptions", "sim_pipeline_error",
     ]:
         st.session_state.pop(key, None)
 
@@ -808,11 +808,11 @@ def _execute_round(
                 reset_simulation()
                 st.rerun()
             except Exception:
-                st.error(
-                    "Terjadi kesalahan saat menganalisis sesi. "
-                    "Silakan hubungi administrator dengan kode sesi: "
-                    f"{session_id[:8]}"
-                )
+                # HOTFIX-A1: persist the failure in session_state so the
+                # error survives the unconditional st.rerun() below and the
+                # completion screen can offer a retry. A plain st.error()
+                # here would be wiped by the rerun before the user sees it.
+                st.session_state["sim_pipeline_error"] = True
 
     st.rerun()
 
@@ -861,6 +861,41 @@ def render_simulation_page() -> None:
         c3.metric("Total Transaksi", f"{len(portfolio.get_sold_trades())} trades")
 
         st.divider()
+
+        # HOTFIX-A1/A2: if the post-session pipeline failed, show a
+        # persistent error with a retry option instead of the results
+        # button. The failed transaction was fully rolled back, so a
+        # retry starts from a clean state. last_session_id is NEVER set
+        # for a failed session (A2) — otherwise the results page renders
+        # an empty "Belum ada data umpan balik" state.
+        if st.session_state.get("sim_pipeline_error"):
+            st.error(
+                "Terjadi kesalahan saat menganalisis sesi. Keputusan kamu "
+                "pada seluruh 14 putaran sudah tersimpan dengan aman — "
+                "hanya tahap analisisnya yang gagal. Silakan coba lagi. "
+                "Jika masalah berlanjut, hubungi administrator dengan "
+                f"kode sesi: `{session_id[:8]}`."
+            )
+            if st.button(
+                "🔄 Coba Analisis Ulang", use_container_width=True, type="primary"
+            ):
+                with st.spinner("Mengulang analisis sesi…"):
+                    try:
+                        _run_post_session_pipeline(user_id, session_id)
+                        st.session_state["sim_pipeline_error"] = False
+                        st.session_state["last_session_id"] = session_id
+                        st.session_state["current_page"] = "Hasil Analisis & Umpan Balik"
+                        reset_simulation()
+                        st.rerun()
+                    except Exception:
+                        _pipeline_logger.exception(
+                            "user=%s session=%s pipeline retry failed",
+                            user_id, session_id,
+                        )
+                        st.session_state["sim_pipeline_error"] = True
+                        st.rerun()
+            return
+
         if st.button("📊 Lihat Hasil Analisis →", use_container_width=True, type="primary"):
             st.session_state["last_session_id"] = session_id
             st.session_state["current_page"] = "Hasil Analisis & Umpan Balik"

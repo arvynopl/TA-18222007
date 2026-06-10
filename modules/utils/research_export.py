@@ -28,6 +28,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+import config
 from database.models import (
     BiasMetric, CdtSnapshot, CognitiveProfile, ConsentLog,
     OnboardingSurvey, PostSessionSurvey, UATFeedback, User, UserAction,
@@ -78,7 +79,21 @@ def _participant_user_ids(db_session: Session) -> set[int]:
             .all()
         )
     }
-    return consent_ids | profile_ids | auth_ids
+    qualified = consent_ids | profile_ids | auth_ids
+
+    # Subtract explicitly-denylisted developer/test accounts (e.g. "test1").
+    # Done by username so the exclusion survives id churn across re-seeds.
+    excluded_usernames = getattr(config, "COHORT_EXCLUDED_USERNAMES", set())
+    if excluded_usernames:
+        denied_ids = {
+            uid for (uid,) in (
+                db_session.query(User.id)
+                .filter(User.username.in_(excluded_usernames))
+                .all()
+            )
+        }
+        qualified -= denied_ids
+    return qualified
 
 
 def _mean_sd(values: list[float]) -> tuple[float, float]:

@@ -142,6 +142,27 @@ def test_get_cohort_summary_basic(db):
     assert summary["mean_dei"] == pytest.approx(expected_mean_dei, abs=1e-3)
 
 
+def test_cohort_excludes_denylisted_username(db):
+    """Denylisted dev/test accounts (e.g. "test1") must be dropped from
+    participant stats even when they hold consent/profile/auth credentials."""
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    real = _make_user(db, "real_participant")
+    _make_profile(db, real.id)
+    db.add(ConsentLog(user_id=real.id, consent_given=True))
+    test1 = _make_user(db, "test1")
+    _make_profile(db, test1.id)
+    db.add(ConsentLog(user_id=test1.id, consent_given=True))
+    db.flush()
+    _make_metric(db, real.id, base, dei=0.1)
+    _make_metric(db, test1.id, base, dei=0.9)
+
+    summary = get_cohort_summary(db, participants_only=True)
+    assert summary["total_users"] == 1
+    assert summary["excluded_non_participants"] == 1
+    # test1's dei=0.9 must not leak into the cohort mean.
+    assert summary["mean_dei"] == pytest.approx(0.1, abs=1e-6)
+
+
 # ---------------------------------------------------------------------------
 # Tests — export_all_users_csv
 # ---------------------------------------------------------------------------
