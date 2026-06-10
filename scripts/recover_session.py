@@ -83,10 +83,14 @@ def recover(session_id_prefix: str, force: bool = False) -> int:
             )
             return 3
 
-        # Guard 2: only recover sessions explicitly marked as failed.
-        if summary.status != "error" and not force:
+        # Guard 2: recover sessions marked as failed ('error') or stuck as
+        # 'in_progress' — the latter occurs when the Streamlit script run is
+        # interrupted mid-pipeline (RerunException/StopException are
+        # BaseException subclasses and bypass the error handler entirely).
+        # Completeness is verified below in both cases.
+        if summary.status not in ("error", "in_progress") and not force:
             logger.error(
-                "Session %s has status=%r (expected 'error'). "
+                "Session %s has status=%r (expected 'error' or 'in_progress'). "
                 "Use --force only after verifying completeness manually.",
                 session_id[:8], summary.status,
             )

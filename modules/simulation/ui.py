@@ -685,18 +685,29 @@ def _run_post_session_pipeline(user_id: int, session_id: str) -> None:
                 summary.window_start_date = st.session_state.get("sim_window_start")
                 summary.window_end_date = st.session_state.get("sim_window_end")
 
-    except Exception:
+    except Exception as exc:
         _pipeline_logger.exception(
             "user=%s session=%s post-session pipeline failed; marking session as error",
             user_id, session_id,
         )
-        # Mark session as error so it doesn't stay stuck as "in_progress"
+        # Mark session as error so it doesn't stay stuck as "in_progress",
+        # and persist the failure cause to the DB: container logs on
+        # Streamlit Cloud are ephemeral, so session_errors is the only
+        # diagnostic record that survives a redeploy.
         try:
+            from modules.utils.export import log_session_error
             with get_session() as err_sess:
                 summary = err_sess.query(SessionSummary).filter_by(session_id=session_id).first()
                 if summary and summary.status != "completed":
                     summary.status = "error"
                     summary.completed_at = datetime.now(timezone.utc)
+                log_session_error(
+                    err_sess,
+                    user_id=user_id,
+                    session_id=session_id,
+                    error_type=type(exc).__name__[:64],
+                    message=str(exc)[:2000],
+                )
         except Exception:
             _pipeline_logger.exception(
                 "user=%s session=%s failed to update session status to error",
@@ -862,38 +873,61 @@ def render_simulation_page() -> None:
 
         st.divider()
 
-        # HOTFIX-A1/A2: if the post-session pipeline failed, show a
-        # persistent error with a retry option instead of the results
-        # button. The failed transaction was fully rolled back, so a
-        # retry starts from a clean state. last_session_id is NEVER set
-        # for a failed session (A2) — otherwise the results page renders
-        # an empty "Belum ada data umpan balik" state.
-        if st.session_state.get("sim_pipeline_error"):
+        # HOTFIX-A1/A2 (revised): gate this screen on DATABASE truth, not
+        # on an in-memory flag. The pipeline can die in two ways:
+        #   1. An Exception inside the pipeline → sim_pipeline_error is set.
+        #   2. The Streamlit script run is interrupted (RerunException /
+        #      StopException are BaseException subclasses) — e.g. a queued
+        #      rerun from a double-click on the final round — which skips
+        #      EVERY except-Exception handler. No flag, no 'error' status,
+        #      session stays 'in_progress' with no BiasMetric.
+        # Querying for the BiasMetric covers both: it exists if and only if
+        # the pipeline transaction committed.
+        from database.models import BiasMetric
+        with get_session() as _chk:
+            _analysis_done = (
+                _chk.query(BiasMetric)
+                .filter_by(user_id=user_id, session_id=session_id)
+                .first()
+                is not None
+            )
+
+        if not _analysis_done:
+            if st.session_state.get("sim_pipeline_error"):
+                _msg = (
+                    "Terjadi kesalahan saat menganalisis sesi. Keputusan kamu "
+                    "pada seluruh 14 putaran sudah tersimpan dengan aman — "
+                    "hanya tahap analisisnya yang gagal."
+                )
+            else:
+                _msg = (
+                    "Analisis sesi belum selesai diproses. Keputusan kamu pada "
+                    "seluruh 14 putaran sudah tersimpan dengan aman."
+                )
             st.error(
-                "Terjadi kesalahan saat menganalisis sesi. Keputusan kamu "
-                "pada seluruh 14 putaran sudah tersimpan dengan aman — "
-                "hanya tahap analisisnya yang gagal. Silakan coba lagi. "
-                "Jika masalah berlanjut, hubungi administrator dengan "
-                f"kode sesi: `{session_id[:8]}`."
+                _msg + " Silakan coba lagi. Jika masalah berlanjut, hubungi "
+                f"administrator dengan kode sesi: `{session_id[:8]}`."
             )
             if st.button(
-                "🔄 Coba Analisis Ulang", use_container_width=True, type="primary"
+                "🔄 Jalankan Analisis", use_container_width=True, type="primary"
             ):
-                with st.spinner("Mengulang analisis sesi…"):
+                _retry_ok = False
+                with st.spinner("Menganalisis keputusan investasi kamu…"):
                     try:
                         _run_post_session_pipeline(user_id, session_id)
-                        st.session_state["sim_pipeline_error"] = False
-                        st.session_state["last_session_id"] = session_id
-                        st.session_state["current_page"] = "Hasil Analisis & Umpan Balik"
-                        reset_simulation()
-                        st.rerun()
+                        _retry_ok = True
                     except Exception:
                         _pipeline_logger.exception(
                             "user=%s session=%s pipeline retry failed",
                             user_id, session_id,
                         )
                         st.session_state["sim_pipeline_error"] = True
-                        st.rerun()
+                if _retry_ok:
+                    st.session_state["sim_pipeline_error"] = False
+                    st.session_state["last_session_id"] = session_id
+                    st.session_state["current_page"] = "Hasil Analisis & Umpan Balik"
+                    reset_simulation()
+                st.rerun()
             return
 
         if st.button("📊 Lihat Hasil Analisis →", use_container_width=True, type="primary"):
