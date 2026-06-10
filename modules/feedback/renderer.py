@@ -14,6 +14,7 @@ import streamlit as st
 from config import (
     DEI_MILD, DEI_MODERATE, DEI_SEVERE,
     LAI_MILD, LAI_MODERATE, LAI_SEVERE,
+    MIN_TRADES_FOR_FULL_SEVERITY,
     OCS_MILD, OCS_MODERATE, OCS_SEVERE,
 )
 from database.connection import get_session
@@ -1032,29 +1033,55 @@ def render_feedback_page(user_id: int, session_id: str) -> None:
     st.divider()
 
     # --- Gauge summary strip ---
+    # CONSISTENCY: gauge colors/labels must reflect the SAME severity as the
+    # pills, cards, and feedback text — i.e. the persisted FeedbackHistory
+    # severity, which applies the MIN_TRADES_FOR_FULL_SEVERITY cap and
+    # confidence gating. Re-classifying the raw value here (the previous
+    # behaviour) showed an uncapped "severe" red gauge next to a capped
+    # "Ringan" pill for small-sample sessions, contradicting the feedback.
+    _fb_sev = {fb["bias_type"]: fb["severity"] for fb in feedbacks}
+    _sev_rank = {"none": 0, "mild": 1, "moderate": 2, "severe": 3}
+    _cap_note = (
+        f"Label keparahan dibatasi karena jumlah transaksi terealisasi pada "
+        f"sesi ini kurang dari {MIN_TRADES_FOR_FULL_SEVERITY}; nilai rasio "
+        f"dari sampel sekecil ini cenderung ekstrem dan belum dapat diandalkan."
+    )
+
     g1, g2, g3 = responsive_columns(3)
     with g1:
-        sev = classify_severity(metric_data["ocs"], OCS_SEVERE, OCS_MODERATE, OCS_MILD)
+        raw_sev = classify_severity(metric_data["ocs"], OCS_SEVERE, OCS_MODERATE, OCS_MILD)
+        sev = _fb_sev.get("overconfidence", raw_sev)
         fig = build_severity_gauge(metric_data["ocs"], 1.0, "Keyakinan Berlebih (OCS)", sev)
         st.plotly_chart(fig, use_container_width=True)
         st.caption(
             f"Ambang batas — Ringan: >{OCS_MILD} | Sedang: >{OCS_MODERATE} | Berat: >{OCS_SEVERE}"
         )
+        if _sev_rank.get(raw_sev, 0) > _sev_rank.get(sev, 0):
+            st.caption(f"ℹ️ {_cap_note}")
     with g2:
-        sev = classify_severity(metric_data["dei"], DEI_SEVERE, DEI_MODERATE, DEI_MILD)
+        raw_sev = classify_severity(metric_data["dei"], DEI_SEVERE, DEI_MODERATE, DEI_MILD)
+        sev = _fb_sev.get("disposition_effect", raw_sev)
         fig = build_severity_gauge(metric_data["dei"], 1.0, "Efek Disposisi (DEI)", sev)
         st.plotly_chart(fig, use_container_width=True)
         st.caption(
             f"Ambang batas — Ringan: >{DEI_MILD} | Sedang: >{DEI_MODERATE} | Berat: >{DEI_SEVERE}"
         )
+        if _sev_rank.get(raw_sev, 0) > _sev_rank.get(sev, 0):
+            st.caption(f"ℹ️ {_cap_note}")
     with g3:
-        sev = classify_severity(metric_data["lai"], LAI_SEVERE, LAI_MODERATE, LAI_MILD)
-        fig = build_severity_gauge(metric_data["lai"], 3.0, "Hindari Kerugian (LAI)", sev)
+        raw_sev = classify_severity(metric_data["lai"], LAI_SEVERE, LAI_MODERATE, LAI_MILD)
+        sev = _fb_sev.get("loss_aversion", raw_sev)
+        # Dynamic axis: LAI is an unbounded ratio; with a fixed max of 3.0 a
+        # value like 4.5 saturated the whole arc (maximum visual alarm).
+        _lai_max = max(3.0, metric_data["lai"] * 1.15)
+        fig = build_severity_gauge(metric_data["lai"], _lai_max, "Hindari Kerugian (LAI)", sev)
         st.plotly_chart(fig, use_container_width=True)
         st.caption(
             f"Ambang batas — Ringan: >{LAI_MILD}× | Sedang: >{LAI_MODERATE}× | Berat: >{LAI_SEVERE}×  "
             f"(rasio durasi tahan rugi vs. untung)"
         )
+        if _sev_rank.get(raw_sev, 0) > _sev_rank.get(sev, 0):
+            st.caption(f"ℹ️ {_cap_note}")
 
     # Build previous-session severity lookup
     prev_severities: dict[str, str | None] = {}
