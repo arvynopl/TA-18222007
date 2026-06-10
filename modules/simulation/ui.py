@@ -738,6 +738,14 @@ def _execute_round(
         (time.time() - st.session_state["sim_round_start_time"]) * 1000
     )
 
+    # Snapshot the in-memory portfolio BEFORE applying orders. If the DB save
+    # below fails, the transaction rolls back but portfolio.buy()/sell()
+    # mutations would otherwise survive in session_state — a retry of the
+    # same round would then apply every order twice (double cash deduction,
+    # phantom positions). Restoring the snapshot keeps memory and DB in sync.
+    import copy as _copy
+    _portfolio_backup = _copy.deepcopy(portfolio)
+
     errors: list[str] = []
     try:
         with get_session() as sess:
@@ -782,9 +790,11 @@ def _execute_round(
                 )
     except Exception:
         # Persisting the round failed mid-way; the SQLAlchemy session has
-        # rolled back. Surface the error and bail out WITHOUT touching
+        # rolled back. Restore the pre-round portfolio snapshot so the
+        # in-memory state matches the DB, then bail out WITHOUT touching
         # sim_current_round / sim_submitted_round so the user can retry the
         # same round instead of getting stranded.
+        st.session_state["sim_portfolio"] = _portfolio_backup
         _pipeline_logger.exception(
             "user=%s session=%s round=%s execute failed",
             user_id, session_id, current_round,

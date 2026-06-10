@@ -126,15 +126,24 @@ def _init_session_state() -> None:
 # ---------------------------------------------------------------------------
 def _render_header() -> None:
     user_logged_in = bool(st.session_state.get("user_id"))
+    # has_sessions is monotonic within a login (a BiasMetric is never deleted
+    # during a session), so cache the first True and skip the DB round-trip
+    # on every subsequent rerun — on a remote Postgres (Neon) this query
+    # otherwise adds latency to EVERY widget interaction.
     has_sessions = False
     if user_logged_in:
-        with get_session() as sess:
-            has_sessions = (
-                sess.query(BiasMetric)
-                .filter_by(user_id=st.session_state["user_id"])
-                .first()
-                is not None
-            )
+        if st.session_state.get("_has_sessions_cache"):
+            has_sessions = True
+        else:
+            with get_session() as sess:
+                has_sessions = (
+                    sess.query(BiasMetric)
+                    .filter_by(user_id=st.session_state["user_id"])
+                    .first()
+                    is not None
+                )
+            if has_sessions:
+                st.session_state["_has_sessions_cache"] = True
 
     enabled_map = {
         "Beranda": True,
@@ -160,7 +169,8 @@ def _render_header() -> None:
         )
     with user_col:
         if st.session_state.get("user_alias"):
-            alias = st.session_state["user_alias"]
+            import html as _html
+            alias = _html.escape(st.session_state["user_alias"])
             # Username label first, then the Keluar button — keeps the tap
             # target on its own row on mobile (full-width via the mobile CSS
             # rule) without the negative-margin trick that breaks at narrow
@@ -187,6 +197,7 @@ def _logout() -> None:
     for key in [
         "user_id", "user_alias", "experience_level",
         "auth_stage", "auth_username", "last_session_id", "onboarding_shown",
+        "_has_sessions_cache",
     ]:
         st.session_state.pop(key, None)
     for key in list(st.session_state.keys()):
