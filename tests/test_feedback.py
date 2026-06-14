@@ -181,7 +181,7 @@ def test_loss_aversion_severe_threshold(db, user):
     metric = _make_metric(db, user.id, lai=2.5)
     profile = get_or_create_profile(db, user.id)
 
-    # 3 realized trades needed for min_sample_met=True so severity is not capped at "mild"
+    # MIN_TRADES_FOR_FULL_SEVERITY=1, so any realized trade enables full severity
     realized = [
         {"stock_id": "BBCA.JK", "buy_round": 1, "sell_round": 8,
          "buy_price": 10000, "sell_price": 8000, "quantity": 10},

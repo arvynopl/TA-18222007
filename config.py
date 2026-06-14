@@ -66,9 +66,14 @@ LAI_SEVERE: float = 2.0
 LAI_MODERATE: float = 1.5
 LAI_MILD: float = 1.2
 
-# Minimum realized trades required before DEI/LAI severity can exceed "mild"
-# Sessions with fewer than this many realized round-trips are capped at "mild"
-MIN_TRADES_FOR_FULL_SEVERITY: int = 3
+# Minimum realized trades required for DEI/LAI severity to be computed at all.
+# With MIN=1, full severity applies as long as ≥1 round-trip is realized.
+# Epistemic uncertainty is still communicated via confidence_gate() levels
+# ("low"/"medium"/"high") — the severity cap is intentionally removed because
+# in a 14-round session many rational buy-and-hold investors will not realize
+# 3+ trades, and capping their severity underestimates actual bias tendency.
+# Paper gains/losses already factor into DEI, so the metric is valid with 1 trade.
+MIN_TRADES_FOR_FULL_SEVERITY: int = 1
 
 # ---------------------------------------------------------------------------
 # DEI formula variant selection

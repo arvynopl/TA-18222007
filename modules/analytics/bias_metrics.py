@@ -107,14 +107,21 @@ class BiasResult:
 def confidence_gate(sample_n: int) -> str:
     """Classify data sufficiency for DEI and LAI metrics.
 
-    Thresholds are calibrated for a 14-round session where 3 realized trades
-    is the minimum to distinguish true behavior from noise (Odean, 1998 guidance).
+    Communicates epistemic uncertainty separately from severity classification.
+    Severity is now uncapped for sample_n ≥ 1 (see MIN_TRADES_FOR_FULL_SEVERITY
+    in config.py); this function only determines the confidence label shown to
+    the user alongside the computed metric.
+
+    Rationale: in a 14-round session, rational buy-and-hold investors may realize
+    only 1–2 trades. DEI already incorporates paper gains/losses, so the metric
+    is valid with a single realized round-trip. Capping severity at "mild" for
+    low trade counts was suppressing genuine bias signals.
 
     Args:
         sample_n: Number of realized round-trip trades in the session.
 
     Returns:
-        "insufficient"  — sample_n < 1: metric is structurally undefined.
+        "insufficient"  — sample_n < 1: metric is structurally undefined (no trades).
         "low"           — 1 ≤ sample_n < 3: metric computed but high variance.
         "medium"        — 3 ≤ sample_n < 5: usable with caution.
         "high"          — sample_n ≥ 5: full statistical confidence.
@@ -478,10 +485,10 @@ def classify_severity(
         moderate_threshold: Value at or above which severity = "moderate".
         mild_t:             Optional value at or above which severity = "mild".
         min_sample_met:     If False, severity is capped at "mild" regardless of value.
-                            Use when the realized trade count is below the
-                            MIN_TRADES_FOR_FULL_SEVERITY threshold (insufficient sample
-                            for DEI and LAI to be meaningfully classified as
-                            moderate/severe). Default True preserves existing behaviour.
+                            Since MIN_TRADES_FOR_FULL_SEVERITY = 1, this is only ever
+                            False when there are zero realized trades — but that case is
+                            already short-circuited by the "insufficient" confidence gate
+                            before this function is called. Retained for API compatibility.
 
     Returns:
         "severe", "moderate", "mild", or "none".

@@ -203,13 +203,14 @@ def test_scenario_02_classic_disposition_severe(fresh_db):
     )
 
 
-# -- Scenario 3: REVERSE DISPOSITION (winners held, losers cut) → capped DEI ------
+# -- Scenario 3: REVERSE DISPOSITION (winners held, losers cut) → high DEI --------
 def test_scenario_03_reverse_disposition_low_dei(fresh_db):
-    """S03: Sell 2 losers (< MIN_TRADES_FOR_FULL_SEVERITY), hold 3 winners → DEI none/mild.
+    """S03: Sell 2 losers, hold 3 winners → DEI moderate/severe (reverse disposition).
 
-    With only 2 realized trades, min_sample_met=False caps DEI severity at mild.
-    abs(DEI) may be high (PLR=1, PGR=0) but the insufficient-sample guard prevents
-    a moderate/severe classification, reflecting uncertainty about the pattern.
+    PGR = 0/(0+3) = 0.0, PLR = 2/(2+0) = 1.0 → DEI = −1.0, abs(DEI) = 1.0.
+    With MIN_TRADES_FOR_FULL_SEVERITY = 1, 2 realized trades → full severity applies.
+    The strong reverse-disposition signal is correctly classified as moderate/severe.
+    Confidence level will be "low" (1 ≤ n < 3) but severity is uncapped.
     """
     db = fresh_db
     user = User(alias="s03", experience_level="beginner")
@@ -252,10 +253,10 @@ def test_scenario_03_reverse_disposition_low_dei(fresh_db):
     dei_sev = _get_severity(feedbacks, "disposition_effect")
     features = extract_session_features(db, user.id, session_id)
 
-    # 2 realized trades < MIN_TRADES_FOR_FULL_SEVERITY → capped at mild
-    assert len(features.realized_trades) < MIN_TRADES_FOR_FULL_SEVERITY
-    assert dei_sev in ("none", "mild"), (
-        f"S03: <{MIN_TRADES_FOR_FULL_SEVERITY} realized trades → DEI capped at mild, got '{dei_sev}'"
+    # 2 realized trades ≥ MIN_TRADES_FOR_FULL_SEVERITY=1 → full severity, no cap
+    assert len(features.realized_trades) >= MIN_TRADES_FOR_FULL_SEVERITY
+    assert dei_sev in ("moderate", "severe"), (
+        f"S03: abs(DEI)=1.0 with 2 realized trades → expected moderate/severe, got '{dei_sev}'"
     )
 
 
@@ -322,10 +323,9 @@ def test_scenario_05_buy_and_hold_passive_ocs(fresh_db):
 def test_scenario_06_severe_loss_aversion(fresh_db):
     """S06: Sell winner at round 2 (1-round hold), hold loser 12 rounds → LAI severe.
 
-    avg_hold_losers = 12, avg_hold_winners = 1 → LAI = 12 ≥ LAI_SEVERE=2.0
-    Realized trades ≥ MIN_TRADES_FOR_FULL_SEVERITY requires ≥3 round-trips.
-    We sell 1 winner and 1 loser to get 2 realized trades — just below threshold.
-    LAI severity is capped at mild (insufficient sample). Test verifies the cap.
+    avg_hold_losers = 12, avg_hold_winners = 1 → LAI = 12 ≥ LAI_SEVERE=2.0.
+    With MIN_TRADES_FOR_FULL_SEVERITY = 1, 2 realized trades → full severity applies.
+    The strong loss-aversion signal is correctly classified as moderate/severe.
     """
     db = fresh_db
     user = User(alias="s06", experience_level="beginner")
@@ -361,14 +361,11 @@ def test_scenario_06_severe_loss_aversion(fresh_db):
     lai_sev = _get_severity(feedbacks, "loss_aversion")
     features = extract_session_features(db, user.id, session_id)
 
-    if len(features.realized_trades) < MIN_TRADES_FOR_FULL_SEVERITY:
-        assert lai_sev in ("none", "mild"), (
-            f"S06: <{MIN_TRADES_FOR_FULL_SEVERITY} realized trades → LAI capped at mild, got '{lai_sev}'"
-        )
-    else:
-        assert lai_sev in ("moderate", "severe"), (
-            f"S06: LAI=12 with sufficient trades → expected moderate/severe, got '{lai_sev}'"
-        )
+    # 2 realized trades ≥ MIN_TRADES_FOR_FULL_SEVERITY=1 → full severity, no cap
+    assert len(features.realized_trades) >= MIN_TRADES_FOR_FULL_SEVERITY
+    assert lai_sev in ("moderate", "severe"), (
+        f"S06: LAI=12 → expected moderate/severe, got '{lai_sev}'"
+    )
 
 
 # -- Scenario 7: EQUAL HOLD PERIODS (LAI ≈ 1 → none) --------------------------
@@ -582,12 +579,13 @@ def test_scenario_12_overtrade_catastrophic_loss(fresh_db):
     )
 
 
-# -- Scenario 13: MIN_TRADES GUARD — only 2 realized trades, high DEI ----------
+# -- Scenario 13: 2 realized winners sold, 1 loser held → strong DEI signal ----
 def test_scenario_13_min_trades_guard_caps_dei(fresh_db):
-    """S13: 2 realized trades (below MIN_TRADES_FOR_FULL_SEVERITY) → DEI capped at mild.
+    """S13: 2 realized winners sold, 1 loser held → DEI moderate/severe.
 
-    Even if PGR=1.0, PLR=0.0 → DEI=1.0, severity is capped at 'mild' when
-    realized trade count < MIN_TRADES_FOR_FULL_SEVERITY.
+    PGR = 2/(2+0) = 1.0, PLR = 0/(0+1) = 0.0 → DEI = 1.0 (classic disposition).
+    With MIN_TRADES_FOR_FULL_SEVERITY = 1, 2 realized trades → full severity applies.
+    Strong disposition-effect signal is correctly classified as moderate/severe.
     """
     db = fresh_db
     user = User(alias="s13", experience_level="beginner")
@@ -630,11 +628,10 @@ def test_scenario_13_min_trades_guard_caps_dei(fresh_db):
     features = extract_session_features(db, user.id, session_id)
 
     assert len(features.realized_trades) == 2
-    assert len(features.realized_trades) < MIN_TRADES_FOR_FULL_SEVERITY
+    assert len(features.realized_trades) >= MIN_TRADES_FOR_FULL_SEVERITY
 
-    assert dei_sev in ("none", "mild"), (
-        f"S13: {len(features.realized_trades)} realized trades < {MIN_TRADES_FOR_FULL_SEVERITY} "
-        f"→ DEI must be capped at mild, got '{dei_sev}'"
+    assert dei_sev in ("moderate", "severe"), (
+        f"S13: DEI=1.0 with 2 realized trades → expected moderate/severe, got '{dei_sev}'"
     )
 
 
